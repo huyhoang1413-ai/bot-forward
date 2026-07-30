@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mở khoá bot</title>
+  <style>
+    body { margin:0; font-family: system-ui, sans-serif; background:#0f172a; color:#e2e8f0; display:grid; place-items:center; height:100vh; }
+    form { background:#1e293b; border:1px solid #334155; border-radius:12px; padding:24px; width:320px; }
+    h1 { font-size:18px; margin:0 0 4px; }
+    p.muted { color:#94a3b8; font-size:13px; margin:0 0 16px; }
+    input { width:100%; padding:10px; margin-bottom:12px; background:#0b1220; border:1px solid #334155; border-radius:8px; color:#e2e8f0; box-sizing:border-box; }
+    button { width:100%; padding:10px; background:#38bdf8; color:#04263a; border:none; border-radius:8px; font-weight:600; cursor:pointer; }
+    .err { color:#fecaca; font-size:13px; margin-bottom:12px; }
+    a { color:#38bdf8; text-decoration:none; font-size:13px; }
+  </style>
+</head>
+<body>
+  <form method="post" action="/bots/{{ bot.id }}/unlock">
+    <h1>🔒 @{{ bot.username }}</h1>
+    <p class="muted">Bot này được bảo vệ. Nhập mật khẩu để truy cập.</p>
+    {% if error %}<div class="err">Sai mật khẩu.</div>{% endif %}
+    <input type="password" name="password" placeholder="Mật khẩu bot" autofocus>
+    <button type="submit">Mở khoá</button>
+    <p style="margin-top:12px"><a href="/">← Về danh sách</a></p>
+  </form>
+</body>
+</html>

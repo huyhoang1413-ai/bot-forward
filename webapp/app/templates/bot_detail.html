@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block content %}
+
+<p><a href="/">← Về danh sách</a></p>
+
+{% if error == "bad_username" %}<div class="err">Username không hợp lệ (5–32 ký tự: chữ, số, gạch dưới).</div>{% endif %}
+{% if error == "bad_source" %}<div class="err">Nhóm nguồn không hợp lệ (phải là nguồn của một tuyến đã có).</div>{% endif %}
+{% if error == "bad_label" %}<div class="err">Nhãn không hợp lệ (1–32 ký tự, không chứa [ ] hoặc xuống dòng).</div>{% endif %}
+
+<div class="card">
+  <h2 style="margin-top:0;font-size:16px">@{{ bot.username }} <span class="pill">{{ bot.status }}</span></h2>
+  <ol class="muted" style="line-height:1.7">
+    <li>Thêm <b>@{{ bot.username }}</b> vào nhóm và đặt làm <b>admin</b>.</li>
+    <li>Gõ <code>/chatid</code> trong mỗi nhóm → bot trả về chat_id.</li>
+    <li>Thêm tuyến bên dưới (tick "hai chiều" để cầu nối 2 chiều).</li>
+  </ol>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;font-size:15px">Thêm tuyến forward</h3>
+  <form method="post" action="/bots/{{ bot.id }}/routes">
+    <div class="row">
+      <div><label>Nhóm nguồn (chat_id)</label><input type="number" name="source_chat_id" required></div>
+      <div><label>Nhóm đích (chat_id)</label><input type="number" name="dest_chat_id" required></div>
+    </div>
+    <label style="margin-top:12px"><input type="checkbox" name="bidirectional" value="true"> Hai chiều (bridge)</label>
+    <div style="margin-top:12px"><button type="submit">Thêm tuyến</button></div>
+  </form>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;font-size:15px">Tuyến & người gửi ({{ source_groups|length }} nhóm nguồn)</h3>
+  <p class="muted">Mỗi nhóm nguồn: chuyển tới đâu + ai được forward. Danh sách người gửi để trống → forward mọi người.
+  Đặt <b>nick name</b> để tin hiển thị dạng <b>[Tên] nội dung</b>.</p>
+
+  {% if not source_groups %}
+  <p class="muted">Chưa có tuyến nào. Thêm tuyến ở khung phía trên.</p>
+  {% endif %}
+
+  {% for g in source_groups %}
+  <details class="group">
+    <summary>
+      <b>{{ g }}</b> → <b>{% for r in routes if r.source_chat_id == g %}{{ r.dest_chat_id }}{% if not loop.last %}, {% endif %}{% endfor %}</b>
+      <span class="muted" style="font-size:12px"> · {{ allowed[g]|length }} người{% if not allowed[g] %} (mọi người){% endif %}</span>
+    </summary>
+    <div style="margin-top:10px">
+      {% if allowed[g] %}
+      <table>
+        <thead><tr><th>Username</th><th>Nick Name</th><th></th></tr></thead>
+        <tbody>
+          {% for a in allowed[g] %}
+          <tr>
+            <td>@{{ a.username }}</td>
+            <td>{{ a.label or '—' }}</td>
+            <td style="text-align:right">
+              <form method="post" action="/bots/{{ bot.id }}/allowed/{{ a.id }}/delete" style="margin:0">
+                <button class="ghost" type="submit">Xoá</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <span class="muted">Không giới hạn — forward mọi người.</span>
+      {% endif %}
+      <form method="post" action="/bots/{{ bot.id }}/allowed" class="row" style="margin-top:8px">
+        <input type="hidden" name="source_chat_id" value="{{ g }}">
+        <div><input type="text" name="username" placeholder="username (không cần @)" required></div>
+        <div><input type="text" name="label" placeholder="nick name (tuỳ chọn)"></div>
+        <label style="flex:0 0 auto"><input type="checkbox" name="both_ways" value="true"> Cả 2 phía</label>
+        <div style="flex:0 0 auto"><button type="submit">Thêm</button></div>
+      </form>
+      {% for r in routes if r.source_chat_id == g %}
+      <form method="post" action="/bots/{{ bot.id }}/routes/{{ r.id }}/delete" style="margin-top:10px; display:inline-block">
+        <button class="ghost" type="submit" style="font-size:12px">Xoá tuyến này</button>
+      </form>
+      {% endfor %}
+    </div>
+  </details>
+  {% endfor %}
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;font-size:15px">Mật khẩu truy cập bot</h3>
+  <p class="muted">Đặt mật khẩu để mỗi lần vào bot này phải nhập (nhớ trong phiên). Để trống = không khoá.
+  Hiện tại: {% if has_password %}<b>🔒 đang bật</b>{% else %}đang tắt{% endif %}.</p>
+  <form method="post" action="/bots/{{ bot.id }}/password" class="row">
+    <div><input type="password" name="password" placeholder="mật khẩu mới (để trống = xoá khoá)"></div>
+    <div style="flex:0 0 auto"><button type="submit">Lưu</button></div>
+  </form>
+</div>
+
+{% endblock %}

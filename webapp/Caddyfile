@@ -1,0 +1,5 @@
+# Domain must have an A-record -> this server's IP.
+# Caddy auto-provisions a Let's Encrypt TLS cert.
+bots.wefunmedia.com {
+    reverse_proxy web:8000
+}

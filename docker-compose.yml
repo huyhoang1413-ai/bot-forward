@@ -1,0 +1,10 @@
+services:
+  bot-forward:
+    build: .
+    container_name: bot-forward
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      # Mount your real routes file (not committed) into the container.
+      - ./config/routes.yaml:/app/config/routes.yaml:ro

@@ -1,0 +1,15 @@
+# Copy this file to `config/routes.yaml` and edit the bridges.
+#
+# Each bridge links TWO groups; messages flow BOTH ways between them.
+# To find a group's chat_id: add the bot to the group, then send /chatid
+# inside that group and the bot will reply with the id.
+#
+# Supergroup ids are large negative numbers starting with -100.
+
+bridges:
+  - [-1001111111111, -1002222222222]
+  # Add more pairs below if needed:
+  # - [-1003333333333, -1004444444444]
+
+# Logging level: DEBUG, INFO, WARNING, ERROR
+log_level: INFO

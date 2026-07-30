@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block content %}
+
+{% if error == "invalid_token" %}<div class="err">Token không hợp lệ — Telegram từ chối.</div>{% endif %}
+{% if error == "duplicate" %}<div class="err">Bot này đã được thêm rồi.</div>{% endif %}
+{% if error == "webhook" %}<div class="err">Lưu được token nhưng đăng ký webhook thất bại. Kiểm tra PUBLIC_URL/HTTPS.</div>{% endif %}
+
+<div class="card">
+  <h2 style="margin-top:0;font-size:16px">Thêm bot mới</h2>
+  <p class="muted">Dán token từ @BotFather. Hệ thống sẽ tự xác thực và bật webhook.</p>
+  <form method="post" action="/bots">
+    <label>Bot token</label>
+    <input type="text" name="token" placeholder="123456:ABC-DEF..." required>
+    <label>Mật khẩu truy cập bot (tuỳ chọn)</label>
+    <input type="text" name="access_password" placeholder="để trống nếu không khoá">
+    <div style="margin-top:12px"><button type="submit">Thêm bot</button></div>
+  </form>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0;font-size:16px">Bot của bạn ({{ bots|length }})</h2>
+  {% if bots %}
+  <table>
+    <thead><tr><th>Bot</th><th>Trạng thái</th><th>Tuyến</th><th></th></tr></thead>
+    <tbody>
+      {% for b in bots %}
+      <tr>
+        <td><a href="/bots/{{ b.id }}">@{{ b.username }}</a>{% if b.access_password_hash %} 🔒{% endif %}</td>
+        <td><span class="pill">{{ b.status }}</span></td>
+        <td>{{ counts[b.id] }}</td>
+        <td style="text-align:right">
+          <form method="post" action="/bots/{{ b.id }}/delete" style="margin:0"
+                onsubmit="return confirm('Xoá bot @{{ b.username }}?')">
+            <button class="danger" type="submit">Xoá</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">Chưa có bot nào. Thêm token ở trên để bắt đầu.</p>
+  {% endif %}
+</div>
+
+{% endblock %}

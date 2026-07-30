@@ -1,0 +1,31 @@
+# Secrets & runtime
+.env
+**/.env
+routes.yaml
+**/routes.yaml
+*.log
+**/*.log
+
+# Databases
+*.db
+*.db-*
+**/*.db
+**/*.db-*
+**/data/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+**/.venv/
+.pytest_cache/
+**/.pytest_cache/
+
+# Local tooling / bulky artifacts
+.claude/
+claudekit.zip
+
+# OS / editor
+.DS_Store
+Thumbs.db

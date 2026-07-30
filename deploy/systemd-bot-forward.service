@@ -1,0 +1,24 @@
+# Linux VPS deployment via systemd.
+# 1. Put the project at /opt/bot-forward with a venv at /opt/bot-forward/.venv
+# 2. Copy this file to /etc/systemd/system/bot-forward.service
+# 3. sudo systemctl daemon-reload && sudo systemctl enable --now bot-forward
+# 4. Logs: sudo journalctl -u bot-forward -f
+
+[Unit]
+Description=Telegram Forward Bot (bidirectional bridge)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/bot-forward
+EnvironmentFile=/opt/bot-forward/.env
+ExecStart=/opt/bot-forward/.venv/bin/python -m bot
+Restart=on-failure
+RestartSec=10
+# Prevent restart storms on a persistent crash.
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Install]
+WantedBy=multi-user.target
