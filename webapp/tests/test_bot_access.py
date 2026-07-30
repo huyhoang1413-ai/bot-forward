@@ -9,7 +9,7 @@ from app.pw import hash_password
 
 
 def _login(client):
-    r = client.post("/login", data={"password": "testpass"}, follow_redirects=False)
+    r = client.post("/login", data={"username": "testuser", "password": "testpass"}, follow_redirects=False)
     assert r.status_code == 303
 
 

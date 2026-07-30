@@ -16,8 +16,9 @@
 <body>
   <form method="post" action="/login">
     <h1>🤖 Bot Forward Panel</h1>
-    {% if error %}<div class="err">Sai mật khẩu.</div>{% endif %}
-    <input type="password" name="password" placeholder="Admin password" autofocus>
+    {% if error %}<div class="err">Sai tên đăng nhập hoặc mật khẩu.</div>{% endif %}
+    <input type="text" name="username" placeholder="Tên đăng nhập" autofocus autocomplete="username">
+    <input type="password" name="password" placeholder="Mật khẩu" autocomplete="current-password">
     <button type="submit">Đăng nhập</button>
   </form>
 </body>

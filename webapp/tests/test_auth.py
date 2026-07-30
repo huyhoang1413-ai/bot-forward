@@ -13,13 +13,28 @@ def test_login_page_is_public(client):
 
 
 def test_wrong_password_redirects_with_error(client):
-    r = client.post("/login", data={"password": "nope"}, follow_redirects=False)
+    r = client.post(
+        "/login", data={"username": "testuser", "password": "nope"},
+        follow_redirects=False,
+    )
     assert r.status_code == 303
     assert "error" in r.headers["location"]
 
 
-def test_correct_password_grants_access(client):
-    r = client.post("/login", data={"password": "testpass"}, follow_redirects=False)
+def test_wrong_username_redirects_with_error(client):
+    r = client.post(
+        "/login", data={"username": "hacker", "password": "testpass"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert "error" in r.headers["location"]
+
+
+def test_correct_credentials_grant_access(client):
+    r = client.post(
+        "/login", data={"username": "testuser", "password": "testpass"},
+        follow_redirects=False,
+    )
     assert r.status_code == 303
     assert r.headers["location"] == "/"
     # Session cookie now set on this client -> dashboard reachable.

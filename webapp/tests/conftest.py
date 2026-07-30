@@ -15,6 +15,7 @@ _tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
 _tmp.close()
 _db_path = _tmp.name.replace("\\", "/")  # sqlite URL needs forward slashes on Windows
 
+os.environ.setdefault("ADMIN_USERNAME", "testuser")
 os.environ.setdefault("ADMIN_PASSWORD", "testpass")
 os.environ.setdefault("SESSION_SECRET", "test-session-secret-value-long")
 os.environ.setdefault("BOT_TOKEN_KEK", Fernet.generate_key().decode())

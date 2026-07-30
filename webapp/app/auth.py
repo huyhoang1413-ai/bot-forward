@@ -54,10 +54,14 @@ def require_bot_access(
 
 
 @router.post("/login")
-async def login(request: Request, password: str = Form(...)):
-    expected = get_settings().admin_password
-    # Constant-time comparison to avoid timing attacks.
-    if hmac.compare_digest(password, expected):
+async def login(
+    request: Request, username: str = Form(...), password: str = Form(...)
+):
+    s = get_settings()
+    # Constant-time comparisons (evaluate both, then combine — no short-circuit).
+    user_ok = hmac.compare_digest(username, s.admin_username)
+    pw_ok = hmac.compare_digest(password, s.admin_password)
+    if user_ok and pw_ok:
         request.session["authed"] = True
         return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
     return RedirectResponse("/login?error=1", status_code=status.HTTP_303_SEE_OTHER)

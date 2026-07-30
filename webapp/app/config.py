@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     # --- Secrets (required) ---
+    admin_username: str = "admin"  # panel login username
     admin_password: str          # single admin login password
     session_secret: str          # signs the session cookie
     bot_token_kek: str           # Fernet key (44-char urlsafe base64) to encrypt bot tokens
