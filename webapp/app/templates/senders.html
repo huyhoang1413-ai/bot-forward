@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Người gửi — {{ bot.username }}{% endblock %}
+{% block content %}
+
+<p><a href="/bots/{{ bot.id }}">← Về chi tiết bot @{{ bot.username }}</a></p>
+
+{% if error == "bad_username" %}<div class="err">Username không hợp lệ (5–32 ký tự: chữ, số, gạch dưới).</div>{% endif %}
+{% if error == "bad_label" %}<div class="err">Nhãn không hợp lệ (1–32 ký tự, không chứa [ ] hoặc xuống dòng).</div>{% endif %}
+
+<div class="card">
+  <h2 style="margin-top:0;font-size:16px">Quản lý người gửi (danh sách chung)</h2>
+  <p class="muted">Khai báo người + nick name một lần, rồi gán họ cho từng nhóm. Danh sách trống = forward mọi người.</p>
+
+  <form method="post" action="/bots/{{ bot.id }}/allowed" class="row" style="margin-bottom:16px">
+    <div><input type="text" name="username" placeholder="username (không cần @)" required></div>
+    <div><input type="text" name="label" placeholder="nick name (tuỳ chọn)"></div>
+    <div style="flex:0 0 auto"><button type="submit">Thêm</button></div>
+  </form>
+
+  <form method="get" action="/bots/{{ bot.id }}/senders" class="row" style="margin-bottom:12px">
+    <div><input type="text" name="q" value="{{ q }}" placeholder="Tìm theo username (gõ đầu tên)..."></div>
+    <div style="flex:0 0 auto"><button type="submit">Tìm</button></div>
+    {% if q %}<div style="flex:0 0 auto"><a href="/bots/{{ bot.id }}/senders" style="line-height:36px">Xoá bộ lọc</a></div>{% endif %}
+  </form>
+
+  {% if items %}
+  <table>
+    <thead><tr><th>Username</th><th>Nick name</th><th></th></tr></thead>
+    <tbody>
+      {% for a in items %}
+      <tr>
+        <td>@{{ a.username }}</td>
+        <td>
+          <form method="post" action="/bots/{{ bot.id }}/allowed/{{ a.id }}/label" style="display:flex; gap:6px; margin:0">
+            <input type="text" name="label" value="{{ a.label or '' }}" placeholder="nick name" style="max-width:200px">
+            <button class="ghost" type="submit" style="font-size:12px">Lưu</button>
+          </form>
+        </td>
+        <td style="text-align:right">
+          <form method="post" action="/bots/{{ bot.id }}/allowed/{{ a.id }}/delete" style="margin:0">
+            <button class="ghost" type="submit" onclick="return confirm('Xoá @{{ a.username }} khỏi danh sách? Sẽ gỡ khỏi mọi nhóm.')">Xoá</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div style="margin-top:12px; display:flex; justify-content:space-between; align-items:center">
+    <span class="muted">Trang {{ page + 1 }}/{{ total_pages }} ({{ total }} người)</span>
+    <div class="row" style="flex:0 0 auto">
+      {% if has_prev %}<a href="/bots/{{ bot.id }}/senders?q={{ q }}&page={{ page - 1 }}">← Trang trước</a>{% endif %}
+      {% if has_next %}<a href="/bots/{{ bot.id }}/senders?q={{ q }}&page={{ page + 1 }}" style="margin-left:12px">Trang sau →</a>{% endif %}
+    </div>
+  </div>
+  {% elif q %}
+  <p class="muted">Không tìm thấy người gửi khớp "{{ q }}".</p>
+  {% else %}
+  <p class="muted">Chưa có người gửi nào. Thêm ở khung phía trên.</p>
+  {% endif %}
+</div>
+
+{% endblock %}

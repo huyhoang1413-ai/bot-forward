@@ -4,12 +4,20 @@ from sqlmodel import Session, select
 
 from app.crypto import encrypt_token
 from app.db import engine
-from app.models import AllowedSender, Bot, Route
+from app.models import AllowedSender, Bot, Route, SenderGroupAssignment
 from app.services import (
     add_allowed_sender,
+    add_group_sender,
     add_route,
+    add_sender_by_username,
+    count_senders,
     delete_allowed_sender,
     delete_route,
+    group_sender_counts,
+    list_group_senders,
+    list_senders,
+    remove_group_sender,
+    search_unassigned,
     update_allowed_label,
 )
 
@@ -129,3 +137,152 @@ def test_update_allowed_label_scoped_and_clears():
         assert _allowed(s, bot_a)[0].label == "New"
         update_allowed_label(s, row.id, "  ", bot_id=bot_a)   # blank -> clear
         assert _allowed(s, bot_a)[0].label is None
+
+
+# --- per-group sender assignment ---
+
+def _assigns(session, source_chat_id, sender_ids):
+    return session.exec(
+        select(SenderGroupAssignment).where(
+            SenderGroupAssignment.source_chat_id == source_chat_id,
+            SenderGroupAssignment.allowed_sender_id.in_(sender_ids or [-1]),
+        )
+    ).all()
+
+
+def test_add_group_sender_idempotent_and_bot_scoped():
+    bot_id = _make_bot(2301)
+    with Session(engine) as s:
+        add_route(s, bot_id, 10, 20)
+        a = add_allowed_sender(s, bot_id, "alice")
+        assert add_group_sender(s, bot_id, 10, a.id) is True
+        assert add_group_sender(s, bot_id, 10, a.id) is True  # idempotent, no dup
+        assert {x.allowed_sender_id for x in _assigns(s, 10, [a.id])} == {a.id}
+        assert len(_assigns(s, 10, [a.id])) == 1
+
+
+def test_add_group_sender_rejects_non_source_group():
+    bot_id = _make_bot(2302)
+    with Session(engine) as s:
+        add_route(s, bot_id, 10, 20)
+        a = add_allowed_sender(s, bot_id, "alice")
+        assert add_group_sender(s, bot_id, 999, a.id) is False  # 999 not a source
+        assert _assigns(s, 999, [a.id]) == []
+
+
+def test_add_group_sender_rejects_foreign_sender():
+    bot_a = _make_bot(2303)
+    bot_b = _make_bot(2304)
+    with Session(engine) as s:
+        add_route(s, bot_a, 10, 20)
+        foreign = add_allowed_sender(s, bot_b, "eve")  # belongs to bot_b
+        assert add_group_sender(s, bot_a, 10, foreign.id) is False  # IDOR
+        assert _assigns(s, 10, [foreign.id]) == []
+
+
+def test_remove_group_sender():
+    bot_id = _make_bot(2307)
+    with Session(engine) as s:
+        add_route(s, bot_id, 10, 20)
+        a = add_allowed_sender(s, bot_id, "alice")
+        add_group_sender(s, bot_id, 10, a.id)
+        remove_group_sender(s, bot_id, 10, a.id)
+        assert _assigns(s, 10, [a.id]) == []
+
+
+def test_delete_allowed_sender_cascades_assignments():
+    bot_id = _make_bot(2305)
+    with Session(engine) as s:
+        add_route(s, bot_id, 10, 20)
+        a = add_allowed_sender(s, bot_id, "alice")
+        add_group_sender(s, bot_id, 10, a.id)
+        assert len(_assigns(s, 10, [a.id])) == 1
+        delete_allowed_sender(s, a.id, bot_id=bot_id)
+        assert _assigns(s, 10, [a.id]) == []
+
+
+def test_delete_last_route_cleans_group_assignments():
+    bot_id = _make_bot(2306)
+    with Session(engine) as s:
+        add_route(s, bot_id, 10, 20)
+        a = add_allowed_sender(s, bot_id, "alice")
+        add_group_sender(s, bot_id, 10, a.id)
+        route = s.exec(
+            select(Route).where(Route.bot_id == bot_id, Route.source_chat_id == 10)
+        ).first()
+        delete_route(s, route.id, bot_id=bot_id)  # last route of source 10
+        assert _assigns(s, 10, [a.id]) == []
+
+
+# --- search / pagination helpers ---
+
+def test_list_senders_search_and_paginate():
+    bot_id = _make_bot(2401)
+    with Session(engine) as s:
+        for i in range(120):
+            add_allowed_sender(s, bot_id, f"user{i:03d}")
+        add_allowed_sender(s, bot_id, "alice")
+        # page 0 default size 50
+        items, total = list_senders(s, bot_id)
+        assert total == 121 and len(items) == 50
+        # page 2 -> remaining 21
+        items2, _ = list_senders(s, bot_id, page=2)
+        assert len(items2) == 21
+        # prefix search
+        res, rtotal = list_senders(s, bot_id, q="alic")
+        assert rtotal == 1 and res[0].username == "alice"
+        # '@' + uppercase normalized
+        res2, _ = list_senders(s, bot_id, q="@ALIC")
+        assert res2 and res2[0].username == "alice"
+
+
+def test_search_unassigned_excludes_assigned():
+    bot_id = _make_bot(2402)
+    with Session(engine) as s:
+        add_route(s, bot_id, 10, 20)
+        a = add_allowed_sender(s, bot_id, "alice")
+        b = add_allowed_sender(s, bot_id, "bob")
+        add_group_sender(s, bot_id, 10, a.id)
+        picker, total = search_unassigned(s, bot_id, 10)
+        names = {x.username for x in picker}
+        assert names == {"bob"} and total == 1
+        # assigned list shows alice
+        assigned, atotal = list_group_senders(s, bot_id, 10)
+        assert {x.username for x in assigned} == {"alice"} and atotal == 1
+        _ = b
+
+
+def test_add_sender_by_username_creates_and_assigns():
+    bot_id = _make_bot(2404)
+    with Session(engine) as s:
+        add_route(s, bot_id, 10, 20)
+        # new username -> created in registry + assigned to group
+        assert add_sender_by_username(s, bot_id, 10, "@Alice", label="Doby") is True
+        senders, total = list_senders(s, bot_id)
+        assert total == 1 and senders[0].username == "alice" and senders[0].label == "Doby"
+        assigned, atotal = list_group_senders(s, bot_id, 10)
+        assert atotal == 1 and assigned[0].username == "alice"
+        # same username again -> no duplicate registry row, still assigned
+        add_sender_by_username(s, bot_id, 10, "alice")
+        _, total2 = list_senders(s, bot_id)
+        assert total2 == 1
+
+
+def test_add_sender_by_username_rejects_non_source():
+    bot_id = _make_bot(2405)
+    with Session(engine) as s:
+        add_route(s, bot_id, 10, 20)
+        assert add_sender_by_username(s, bot_id, 999, "alice") is False
+        assert count_senders(s, bot_id) == 0  # nothing created for a bad source
+
+
+def test_count_helpers():
+    bot_id = _make_bot(2403)
+    with Session(engine) as s:
+        add_route(s, bot_id, 10, 20)
+        add_route(s, bot_id, 11, 21)
+        a = add_allowed_sender(s, bot_id, "alice")
+        add_allowed_sender(s, bot_id, "bob")
+        add_group_sender(s, bot_id, 10, a.id)
+        assert count_senders(s, bot_id) == 2
+        assert group_sender_counts(s, bot_id) == {10: 1}

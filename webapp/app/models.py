@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import UniqueConstraint
+from sqlalchemy import Index, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 
@@ -66,6 +66,27 @@ class AllowedSender(SQLModel, table=True):
 
     __table_args__ = (
         UniqueConstraint("bot_id", "source_chat_id", "username", name="uq_allowed_sender"),
+    )
+
+
+class SenderGroupAssignment(SQLModel, table=True):
+    """Which global ``AllowedSender`` applies to which source group (many-to-many).
+
+    The allowlist is declared once globally; these rows scope each sender to
+    specific source groups. A source group with NO assignment rows is 'open'
+    (forward everyone from it); a group with rows forwards only those senders.
+    """
+
+    id: int | None = Field(default=None, primary_key=True)
+    allowed_sender_id: int = Field(foreign_key="allowedsender.id", index=True)
+    source_chat_id: int = Field(index=True)
+    created_at: datetime = Field(default_factory=_now)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "allowed_sender_id", "source_chat_id", name="uq_sender_group_assign"
+        ),
+        Index("ix_group_sender", "source_chat_id", "allowed_sender_id"),
     )
 
 

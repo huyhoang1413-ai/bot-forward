@@ -13,12 +13,16 @@ from app import services, telegram_api
 from app.auth import require_admin, require_bot_access, unlock_bot
 from app.db import get_session
 from app.forwarding import is_valid_label, is_valid_username
-from app.models import AllowedSender, Bot, Route
+from app.models import Bot, Route
 from app.pw import verify_password
 
 router = APIRouter()
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+
+# How many assigned senders to preview inline in a group's dropdown before
+# linking out to the dedicated (search + paginate) manager page.
+INLINE_PREVIEW = 20
 
 
 @router.get("/login", response_class=HTMLResponse)
@@ -125,10 +129,27 @@ async def bot_detail(bot_id: int, request: Request, session: Session = Depends(g
         if r.source_chat_id not in source_groups:
             source_groups.append(r.source_chat_id)
 
-    # Bot-wide allowlist (applies to every group).
-    allowed_senders = session.exec(
-        select(AllowedSender).where(AllowedSender.bot_id == bot_id)
-    ).all()
+    senders_count = services.count_senders(session, bot_id)
+
+    # Which group's dropdown to keep open (after an inline add/remove).
+    try:
+        open_group = int(request.query_params.get("g", ""))
+    except (TypeError, ValueError):
+        open_group = None
+    if open_group not in source_groups:
+        open_group = None
+
+    # Per group: a capped preview of assigned senders + total (inline management).
+    # Capped so a 500-sender group doesn't dump 500 rows into the page; the
+    # dedicated page handles search/full list when total exceeds the preview.
+    assigned_preview: dict[int, list] = {}
+    group_totals: dict[int, int] = {}
+    for g in source_groups:
+        items, total = services.list_group_senders(
+            session, bot_id, g, page=0, page_size=INLINE_PREVIEW
+        )
+        assigned_preview[g] = items
+        group_totals[g] = total
 
     return templates.TemplateResponse(
         request,
@@ -137,11 +158,148 @@ async def bot_detail(bot_id: int, request: Request, session: Session = Depends(g
             "bot": bot,
             "routes": routes,
             "source_groups": source_groups,
-            "allowed_senders": allowed_senders,
+            "senders_count": senders_count,
+            "assigned_preview": assigned_preview,
+            "group_totals": group_totals,
+            "open_group": open_group,
+            "inline_preview": INLINE_PREVIEW,
             "has_password": bool(bot.access_password_hash),
             "error": request.query_params.get("error"),
         },
     )
+
+
+def _page_ctx(total: int, page: int, page_size: int) -> dict:
+    """Common pagination context (1-based display, 0-based `page`)."""
+    total_pages = max(1, -(-total // page_size))
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages,
+        "has_prev": page > 0,
+        "has_next": page + 1 < total_pages,
+    }
+
+
+@router.get(
+    "/bots/{bot_id}/senders", response_class=HTMLResponse,
+    dependencies=[Depends(require_admin), Depends(require_bot_access)],
+)
+async def senders_page(
+    bot_id: int, request: Request, q: str = "", page: int = 0,
+    session: Session = Depends(get_session),
+):
+    bot = session.get(Bot, bot_id)
+    if not bot:
+        return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
+    items, total = services.list_senders(session, bot_id, q, page)
+    ctx = {
+        "bot": bot, "items": items, "q": q,
+        "error": request.query_params.get("error"),
+        **_page_ctx(total, page, services.PAGE_SIZE),
+    }
+    return templates.TemplateResponse(request, "senders.html", ctx)
+
+
+@router.get(
+    "/bots/{bot_id}/groups/{source_chat_id}/senders", response_class=HTMLResponse,
+    dependencies=[Depends(require_admin), Depends(require_bot_access)],
+)
+async def group_senders_page(
+    bot_id: int, source_chat_id: int, request: Request,
+    q: str = "", page: int = 0, aq: str = "", apage: int = 0,
+    session: Session = Depends(get_session),
+):
+    bot = session.get(Bot, bot_id)
+    if not bot or not services._is_bot_source(session, bot_id, source_chat_id):
+        return RedirectResponse(f"/bots/{bot_id}", status_code=status.HTTP_303_SEE_OTHER)
+    picker, ptotal = services.search_unassigned(session, bot_id, source_chat_id, q, page)
+    assigned, atotal = services.list_group_senders(session, bot_id, source_chat_id, aq, apage)
+    pctx = _page_ctx(ptotal, page, services.PAGE_SIZE)
+    actx = _page_ctx(atotal, apage, services.PAGE_SIZE)
+    return templates.TemplateResponse(
+        request, "group_senders.html",
+        {
+            "bot": bot, "source_chat_id": source_chat_id,
+            "picker": picker, "assigned": assigned,
+            "q": q, "aq": aq,
+            # picker paging
+            "p_total": ptotal, "p_page": page, "p_total_pages": pctx["total_pages"],
+            "p_has_prev": pctx["has_prev"], "p_has_next": pctx["has_next"],
+            # assigned paging
+            "a_total": atotal, "a_page": apage, "a_total_pages": actx["total_pages"],
+            "a_has_prev": actx["has_prev"], "a_has_next": actx["has_next"],
+        },
+    )
+
+
+@router.post(
+    "/bots/{bot_id}/groups/{source_chat_id}/senders/{sender_id}/add",
+    dependencies=[Depends(require_admin), Depends(require_bot_access)],
+)
+async def group_add(
+    bot_id: int, source_chat_id: int, sender_id: int,
+    session: Session = Depends(get_session),
+):
+    services.add_group_sender(session, bot_id, source_chat_id, sender_id)
+    return RedirectResponse(
+        f"/bots/{bot_id}/groups/{source_chat_id}/senders",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post(
+    "/bots/{bot_id}/groups/{source_chat_id}/senders/{sender_id}/remove",
+    dependencies=[Depends(require_admin), Depends(require_bot_access)],
+)
+async def group_remove(
+    bot_id: int, source_chat_id: int, sender_id: int,
+    session: Session = Depends(get_session),
+):
+    services.remove_group_sender(session, bot_id, source_chat_id, sender_id)
+    return RedirectResponse(
+        f"/bots/{bot_id}/groups/{source_chat_id}/senders",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+def _group_detail_redirect(bot_id: int, source_chat_id: int, error: str = "") -> RedirectResponse:
+    """Back to the bot-detail page with this group's dropdown open (+ anchor)."""
+    q = f"&error={error}" if error else ""
+    return RedirectResponse(
+        f"/bots/{bot_id}?g={source_chat_id}{q}#g{source_chat_id}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post(
+    "/bots/{bot_id}/groups/{source_chat_id}/senders-inline/add",
+    dependencies=[Depends(require_admin), Depends(require_bot_access)],
+)
+async def group_inline_add(
+    bot_id: int, source_chat_id: int,
+    username: str = Form(...), label: str = Form(""),
+    session: Session = Depends(get_session),
+):
+    if not is_valid_username(username):
+        return _group_detail_redirect(bot_id, source_chat_id, "bad_username")
+    if label.strip() and not is_valid_label(label):
+        return _group_detail_redirect(bot_id, source_chat_id, "bad_label")
+    services.add_sender_by_username(session, bot_id, source_chat_id, username, label=label)
+    return _group_detail_redirect(bot_id, source_chat_id)
+
+
+@router.post(
+    "/bots/{bot_id}/groups/{source_chat_id}/senders-inline/{sender_id}/remove",
+    dependencies=[Depends(require_admin), Depends(require_bot_access)],
+)
+async def group_inline_remove(
+    bot_id: int, source_chat_id: int, sender_id: int,
+    session: Session = Depends(get_session),
+):
+    services.remove_group_sender(session, bot_id, source_chat_id, sender_id)
+    return _group_detail_redirect(bot_id, source_chat_id)
 
 
 @router.post(
@@ -189,14 +347,18 @@ async def create_allowed(
 ):
     if not is_valid_username(username):
         return RedirectResponse(
-            f"/bots/{bot_id}?error=bad_username", status_code=status.HTTP_303_SEE_OTHER
+            f"/bots/{bot_id}/senders?error=bad_username",
+            status_code=status.HTTP_303_SEE_OTHER,
         )
     if label.strip() and not is_valid_label(label):
         return RedirectResponse(
-            f"/bots/{bot_id}?error=bad_label", status_code=status.HTTP_303_SEE_OTHER
+            f"/bots/{bot_id}/senders?error=bad_label",
+            status_code=status.HTTP_303_SEE_OTHER,
         )
     services.add_allowed_sender(session, bot_id, username, label=label)
-    return RedirectResponse(f"/bots/{bot_id}", status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(
+        f"/bots/{bot_id}/senders", status_code=status.HTTP_303_SEE_OTHER
+    )
 
 
 @router.post(
@@ -207,7 +369,9 @@ async def remove_allowed(
     bot_id: int, allowed_id: int, session: Session = Depends(get_session)
 ):
     services.delete_allowed_sender(session, allowed_id, bot_id=bot_id)
-    return RedirectResponse(f"/bots/{bot_id}", status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(
+        f"/bots/{bot_id}/senders", status_code=status.HTTP_303_SEE_OTHER
+    )
 
 
 @router.post(
@@ -222,7 +386,10 @@ async def edit_allowed_label(
 ):
     if label.strip() and not is_valid_label(label):
         return RedirectResponse(
-            f"/bots/{bot_id}?error=bad_label", status_code=status.HTTP_303_SEE_OTHER
+            f"/bots/{bot_id}/senders?error=bad_label",
+            status_code=status.HTTP_303_SEE_OTHER,
         )
     services.update_allowed_label(session, allowed_id, label, bot_id=bot_id)
-    return RedirectResponse(f"/bots/{bot_id}", status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(
+        f"/bots/{bot_id}/senders", status_code=status.HTTP_303_SEE_OTHER
+    )

@@ -207,17 +207,25 @@ def build_jobs(
     telegram_bot_id: int,
     routes: Sequence[Route],
     bot_id: int,
-    allowed_senders: dict[str, str | None] | None = None,
+    allowed_by_source: dict[int, dict[str, str | None]] | None = None,
+    label_map: dict[str, str | None] | None = None,
+    gate_active: bool = False,
 ) -> list[ForwardJob]:
     """Turn one update into durable outbox jobs (pure — inserts happen later).
 
     Jobs are created per destination in a deterministic order, so their row ids
     preserve the source message order for each destination chat.
 
-    ``allowed_senders`` is the bot's global allowlist: {username: label_or_None}.
-    A non-empty map forwards only those usernames (from any group); an empty /
-    missing map forwards everyone. A username's label (if set) prefixes its
-    forwarded messages with '[label]'. Commands (/chatid, /start) are never gated.
+    Gating (per-group allowlist):
+    - ``gate_active`` False (bot has no senders) -> forward everyone.
+    - ``gate_active`` True: a source group present in ``allowed_by_source`` is
+      restricted to that {username: label} set; a source group ABSENT from the
+      map is 'open' (forward everyone). An empty set is never stored for a
+      source (absence encodes 'open'), so a restricted group always has ≥1 user.
+
+    Labeling is decoupled from gating: ``label_map`` is the bot's global
+    {username: label}; any forwarded message whose sender has a label gets the
+    '[label]' prefix, even from an open group. Commands are never gated.
     """
     action = decide_action(update, telegram_bot_id)
 
@@ -242,12 +250,17 @@ def build_jobs(
             )
         ]
 
-    # forward -> gate by the bot's global allowlist, then one job per dest
-    allowed = allowed_senders or {}
-    if not is_sender_allowed(action.sender_username, set(allowed.keys())):
-        return []
+    # forward -> gate by the source group's assigned senders, then one job per dest
+    if gate_active:
+        group_map = (allowed_by_source or {}).get(action.source_chat_id)
+        # group_map None -> group has no assignment -> open (no gate)
+        if group_map is not None and not is_sender_allowed(
+            action.sender_username, set(group_map.keys())
+        ):
+            return []
 
-    label = allowed.get(action.sender_username) if action.sender_username else None
+    # label is decoupled from gating: applied to any known labeled sender
+    label = (label_map or {}).get(action.sender_username) if action.sender_username else None
     msg = update.get("message") or update.get("edited_message") or {}
 
     jobs: list[ForwardJob] = []

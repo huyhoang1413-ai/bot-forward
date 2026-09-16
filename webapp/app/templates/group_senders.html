@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Người gửi nhóm {{ source_chat_id }} — {{ bot.username }}{% endblock %}
+{% block content %}
+
+<p><a href="/bots/{{ bot.id }}">← Về chi tiết bot @{{ bot.username }}</a></p>
+
+<div class="card">
+  <h2 style="margin-top:0;font-size:16px">Người gửi cho nhóm <code>{{ source_chat_id }}</code></h2>
+  <p class="muted">Tìm người trong danh sách chung để thêm, hoặc xoá bên dưới. Để trống = forward mọi người trong nhóm.</p>
+
+  <!-- Find & add -->
+  <form method="get" action="/bots/{{ bot.id }}/groups/{{ source_chat_id }}/senders" class="row" style="margin-bottom:8px">
+    <input type="hidden" name="aq" value="{{ aq }}">
+    <input type="hidden" name="apage" value="{{ a_page }}">
+    <div><input type="text" name="q" value="{{ q }}" placeholder="Tìm username để thêm (gõ đầu tên)..."></div>
+    <div style="flex:0 0 auto"><button type="submit">Tìm</button></div>
+    {% if q %}<div style="flex:0 0 auto"><a href="/bots/{{ bot.id }}/groups/{{ source_chat_id }}/senders" style="line-height:36px">Xoá tìm</a></div>{% endif %}
+  </form>
+
+  {% if q %}
+    {% if picker %}
+    {% for s in picker %}
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid var(--line)">
+      <span>@{{ s.username }}{% if s.label %} <span class="muted">— {{ s.label }}</span>{% endif %}</span>
+      <form method="post" action="/bots/{{ bot.id }}/groups/{{ source_chat_id }}/senders/{{ s.id }}/add" style="margin:0">
+        <button type="submit" style="font-size:12px; padding:4px 10px">Thêm</button>
+      </form>
+    </div>
+    {% endfor %}
+    <div style="margin-top:8px" class="muted">
+      Kết quả: trang {{ p_page + 1 }}/{{ p_total_pages }} ({{ p_total }})
+      {% if p_has_prev %}<a href="?q={{ q }}&page={{ p_page - 1 }}&aq={{ aq }}&apage={{ a_page }}" style="margin-left:8px">←</a>{% endif %}
+      {% if p_has_next %}<a href="?q={{ q }}&page={{ p_page + 1 }}&aq={{ aq }}&apage={{ a_page }}" style="margin-left:8px">→</a>{% endif %}
+    </div>
+    {% else %}
+    <p class="muted">Không tìm thấy "{{ q }}" (hoặc đã có trong nhóm).</p>
+    {% endif %}
+  {% endif %}
+
+  <!-- Assigned -->
+  <h3 style="font-size:14px; border-top:1px solid var(--line); padding-top:12px; margin-top:14px">Được phép forward (nhóm này)</h3>
+  {% if assigned %}
+  {% for s in assigned %}
+  <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid var(--line)">
+    <span>@{{ s.username }}{% if s.label %} <span class="muted">— {{ s.label }}</span>{% endif %}</span>
+    <form method="post" action="/bots/{{ bot.id }}/groups/{{ source_chat_id }}/senders/{{ s.id }}/remove" style="margin:0">
+      <button class="ghost" type="submit" style="font-size:12px; padding:4px 10px" onclick="return confirm('Xoá @{{ s.username }} khỏi nhóm này?')">Xoá</button>
+    </form>
+  </div>
+  {% endfor %}
+  <div style="margin-top:10px" class="muted">
+    Trang {{ a_page + 1 }}/{{ a_total_pages }} ({{ a_total }} người)
+    {% if a_has_prev %}<a href="?q={{ q }}&page={{ p_page }}&aq={{ aq }}&apage={{ a_page - 1 }}" style="margin-left:8px">←</a>{% endif %}
+    {% if a_has_next %}<a href="?q={{ q }}&page={{ p_page }}&aq={{ aq }}&apage={{ a_page + 1 }}" style="margin-left:8px">→</a>{% endif %}
+  </div>
+  {% else %}
+  <p class="muted">Chưa giới hạn — đang forward mọi người trong nhóm này.</p>
+  {% endif %}
+</div>
+
+{% endblock %}

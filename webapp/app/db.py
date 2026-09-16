@@ -39,7 +39,9 @@ if _url.startswith("sqlite"):
 def create_db_and_tables() -> None:
     SQLModel.metadata.create_all(engine)
     _add_missing_columns()
+    _add_search_indexes()
     _collapse_allowed_senders_to_global()
+    _backfill_group_sender_assignments()
 
 
 def _add_missing_columns() -> None:
@@ -102,6 +104,57 @@ def _collapse_allowed_senders_to_global() -> None:
                     session.add(existing)
                 session.delete(row)  # drop the now-redundant per-group duplicate
         session.commit()
+
+
+def _add_search_indexes() -> None:
+    """Additive: create a case-insensitive index on (bot_id, username) so the
+    admin UI's prefix search (``username LIKE 'q%'``) is index-backed at 500-1000
+    senders. ``create_all()`` can't add an index to an existing table, and
+    COLLATE NOCASE needs raw DDL. Idempotent via IF NOT EXISTS.
+    """
+    if not inspect(engine).has_table("allowedsender"):
+        return
+    with engine.begin() as conn:
+        conn.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS ix_allowedsender_bot_username "
+            "ON allowedsender(bot_id, username COLLATE NOCASE)"
+        )
+
+
+def _backfill_group_sender_assignments() -> None:
+    """One-time idempotent migration for the per-group assignment feature.
+
+    Assign every existing global sender to every distinct source group of its
+    bot, preserving today's 'the allowlist applies to all groups' behavior.
+    A no-op once each (sender, group) pair already has an assignment row.
+    """
+    from app.models import AllowedSender, Route, SenderGroupAssignment
+
+    if not inspect(engine).has_table("sendergroupassignment"):
+        return
+    with Session(engine) as session:
+        senders = session.exec(select(AllowedSender)).all()
+        if not senders:
+            return
+        existing = {
+            (a.allowed_sender_id, a.source_chat_id)
+            for a in session.exec(select(SenderGroupAssignment)).all()
+        }
+        groups_by_bot: dict[int, set[int]] = {}
+        for r in session.exec(select(Route)).all():
+            groups_by_bot.setdefault(r.bot_id, set()).add(r.source_chat_id)
+
+        made = False
+        for snd in senders:
+            for src in groups_by_bot.get(snd.bot_id, ()):  # no routes -> nothing to assign
+                if (snd.id, src) in existing:
+                    continue
+                session.add(
+                    SenderGroupAssignment(allowed_sender_id=snd.id, source_chat_id=src)
+                )
+                made = True
+        if made:
+            session.commit()
 
 
 def get_session() -> Iterator[Session]:

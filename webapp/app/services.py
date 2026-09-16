@@ -5,12 +5,20 @@ from __future__ import annotations
 import logging
 import secrets
 
+from sqlalchemy import func
 from sqlmodel import Session, select
 
 from app import botcache, telegram_api
 from app.crypto import decrypt_token, encrypt_token
 from app.forwarding import normalize_username
-from app.models import GLOBAL_SOURCE, AllowedSender, Bot, ForwardJob, Route
+from app.models import (
+    GLOBAL_SOURCE,
+    AllowedSender,
+    Bot,
+    ForwardJob,
+    Route,
+    SenderGroupAssignment,
+)
 from app.pw import hash_password
 
 logger = logging.getLogger(__name__)
@@ -76,9 +84,18 @@ async def remove_bot(session: Session, bot_id: int) -> None:
         session.delete(route)
     for job in session.exec(select(ForwardJob).where(ForwardJob.bot_id == bot_id)).all():
         session.delete(job)
-    for allowed in session.exec(
+    allowed_rows = session.exec(
         select(AllowedSender).where(AllowedSender.bot_id == bot_id)
-    ).all():
+    ).all()
+    allowed_ids = [a.id for a in allowed_rows]
+    if allowed_ids:
+        for assign in session.exec(
+            select(SenderGroupAssignment).where(
+                SenderGroupAssignment.allowed_sender_id.in_(allowed_ids)
+            )
+        ).all():
+            session.delete(assign)
+    for allowed in allowed_rows:
         session.delete(allowed)
     session.delete(bot)
     session.commit()
@@ -133,8 +150,39 @@ def add_route(
 def delete_route(session: Session, route_id: int, bot_id: int | None = None) -> None:
     route = session.get(Route, route_id)
     # Scope the delete to the bot in the URL to avoid cross-bot deletion (IDOR).
-    if route and (bot_id is None or route.bot_id == bot_id):
-        session.delete(route)
+    if not route or (bot_id is not None and route.bot_id != bot_id):
+        return
+    owner_bot_id = route.bot_id
+    source = route.source_chat_id
+    session.delete(route)
+    session.commit()
+
+    # Best-effort: if that source group has no routes left, drop its stale
+    # per-group assignments (they would never match again anyway).
+    remaining = session.exec(
+        select(Route).where(
+            Route.bot_id == owner_bot_id, Route.source_chat_id == source
+        )
+    ).first()
+    if remaining is not None:
+        return
+    own_ids = [
+        s.id
+        for s in session.exec(
+            select(AllowedSender).where(AllowedSender.bot_id == owner_bot_id)
+        ).all()
+    ]
+    if not own_ids:
+        return
+    stale = session.exec(
+        select(SenderGroupAssignment).where(
+            SenderGroupAssignment.source_chat_id == source,
+            SenderGroupAssignment.allowed_sender_id.in_(own_ids),
+        )
+    ).all()
+    for a in stale:
+        session.delete(a)
+    if stale:
         session.commit()
 
 
@@ -203,6 +251,176 @@ def delete_allowed_sender(
 ) -> None:
     row = session.get(AllowedSender, allowed_id)
     if row and (bot_id is None or row.bot_id == bot_id):
+        # Cascade: drop this sender's per-group assignments first.
+        for a in session.exec(
+            select(SenderGroupAssignment).where(
+                SenderGroupAssignment.allowed_sender_id == allowed_id
+            )
+        ).all():
+            session.delete(a)
+        session.delete(row)
+        session.commit()
+
+
+# --- Sender search / pagination (scales to 500-1000 senders) ---
+
+PAGE_SIZE = 50
+
+
+def _norm_q(q: str | None) -> str:
+    """Normalize a search term the same way usernames are stored (lowercase, no '@')."""
+    return (q or "").strip().lstrip("@").lower()
+
+
+def _paginate(session: Session, base, page: int, page_size: int):
+    """Return (items, total) for a select, ordered by username, offset-paginated."""
+    total = session.exec(select(func.count()).select_from(base.subquery())).one()
+    page = max(0, page)
+    items = session.exec(
+        base.order_by(AllowedSender.username).offset(page * page_size).limit(page_size)
+    ).all()
+    return items, total
+
+
+def list_senders(
+    session: Session, bot_id: int, q: str = "", page: int = 0, page_size: int = PAGE_SIZE
+):
+    """The bot's registry senders, prefix-searched by username, paginated."""
+    base = select(AllowedSender).where(AllowedSender.bot_id == bot_id)
+    if q:
+        base = base.where(AllowedSender.username.startswith(_norm_q(q)))
+    return _paginate(session, base, page, page_size)
+
+
+def list_group_senders(
+    session: Session, bot_id: int, source_chat_id: int, q: str = "",
+    page: int = 0, page_size: int = PAGE_SIZE,
+):
+    """Senders assigned to one source group (JOIN), prefix-searched, paginated."""
+    base = (
+        select(AllowedSender)
+        .join(
+            SenderGroupAssignment,
+            AllowedSender.id == SenderGroupAssignment.allowed_sender_id,
+        )
+        .where(
+            AllowedSender.bot_id == bot_id,
+            SenderGroupAssignment.source_chat_id == source_chat_id,
+        )
+    )
+    if q:
+        base = base.where(AllowedSender.username.startswith(_norm_q(q)))
+    return _paginate(session, base, page, page_size)
+
+
+def search_unassigned(
+    session: Session, bot_id: int, source_chat_id: int, q: str = "",
+    page: int = 0, page_size: int = PAGE_SIZE,
+):
+    """Registry senders NOT yet assigned to this group (add picker), paginated."""
+    assigned = select(SenderGroupAssignment.allowed_sender_id).where(
+        SenderGroupAssignment.source_chat_id == source_chat_id
+    )
+    base = select(AllowedSender).where(
+        AllowedSender.bot_id == bot_id, ~AllowedSender.id.in_(assigned)
+    )
+    if q:
+        base = base.where(AllowedSender.username.startswith(_norm_q(q)))
+    return _paginate(session, base, page, page_size)
+
+
+def group_sender_counts(session: Session, bot_id: int) -> dict[int, int]:
+    """{source_chat_id: number of assigned senders} for the bot (one grouped query)."""
+    rows = session.exec(
+        select(
+            SenderGroupAssignment.source_chat_id, func.count()
+        )
+        .join(
+            AllowedSender, AllowedSender.id == SenderGroupAssignment.allowed_sender_id
+        )
+        .where(AllowedSender.bot_id == bot_id)
+        .group_by(SenderGroupAssignment.source_chat_id)
+    ).all()
+    return {src: cnt for src, cnt in rows}
+
+
+def count_senders(session: Session, bot_id: int) -> int:
+    """Number of registry senders for the bot."""
+    return session.exec(
+        select(func.count()).select_from(
+            select(AllowedSender).where(AllowedSender.bot_id == bot_id).subquery()
+        )
+    ).one()
+
+
+def _is_bot_source(session: Session, bot_id: int, source_chat_id: int) -> bool:
+    return session.exec(
+        select(Route.source_chat_id).where(
+            Route.bot_id == bot_id, Route.source_chat_id == source_chat_id
+        )
+    ).first() is not None
+
+
+def add_group_sender(
+    session: Session, bot_id: int, source_chat_id: int, sender_id: int
+) -> bool:
+    """Assign one registry sender to one source group (idempotent, bot-scoped).
+
+    Returns False on an IDOR/validation miss (sender not the bot's, or the source
+    is not a real route source of the bot).
+    """
+    sender = session.get(AllowedSender, sender_id)
+    if not sender or sender.bot_id != bot_id:
+        return False
+    if not _is_bot_source(session, bot_id, source_chat_id):
+        return False
+    exists = session.exec(
+        select(SenderGroupAssignment).where(
+            SenderGroupAssignment.allowed_sender_id == sender_id,
+            SenderGroupAssignment.source_chat_id == source_chat_id,
+        )
+    ).first()
+    if not exists:
+        session.add(
+            SenderGroupAssignment(
+                allowed_sender_id=sender_id, source_chat_id=source_chat_id
+            )
+        )
+        session.commit()
+    return True
+
+
+def add_sender_by_username(
+    session: Session, bot_id: int, source_chat_id: int,
+    username: str, label: str | None = None,
+) -> bool:
+    """Assign a sender to a group by username (find-or-create in the registry).
+
+    Convenience for inline per-group add: creates the global AllowedSender if it
+    doesn't exist yet (updating its label when given), then assigns it to the
+    group. Returns False if the source is not a real route source of the bot.
+    """
+    if not _is_bot_source(session, bot_id, source_chat_id):
+        return False
+    sender = add_allowed_sender(session, bot_id, username, label=label)
+    add_group_sender(session, bot_id, source_chat_id, sender.id)
+    return True
+
+
+def remove_group_sender(
+    session: Session, bot_id: int, source_chat_id: int, sender_id: int
+) -> None:
+    """Unassign one sender from one source group (bot-scoped)."""
+    sender = session.get(AllowedSender, sender_id)
+    if not sender or sender.bot_id != bot_id:
+        return
+    row = session.exec(
+        select(SenderGroupAssignment).where(
+            SenderGroupAssignment.allowed_sender_id == sender_id,
+            SenderGroupAssignment.source_chat_id == source_chat_id,
+        )
+    ).first()
+    if row:
         session.delete(row)
         session.commit()
 

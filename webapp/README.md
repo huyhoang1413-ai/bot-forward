@@ -57,10 +57,13 @@ pytest
 Kiểm thử thật (mã hoá, logic forward, auth, webhook secret), không mock/không gọi mạng.
 
 ## Người gửi được forward + nhãn
-**Một danh sách chung cho cả bot** (trang bot → mục **"Người gửi được forward + nhãn (áp dụng cho MỌI nhóm)"**) — không cần vào từng nhóm:
-- **Danh sách trống = forward mọi người** (mặc định).
-- Thêm `username` (không cần `@`) → **chỉ forward những người đó**, áp dụng cho **tất cả các nhóm** của bot.
-- Đặt **nhãn** cho username → tin hiển thị **`[Tên] nội dung`**:
+**Khai báo chung, gán theo nhóm — có tìm kiếm + phân trang (chịu được 500–1000 người).**
+- **Trang "Quản lý người gửi"** (`/bots/{id}/senders`, mở từ chi tiết bot): khai báo mỗi người + nhãn **một lần**, có ô **tìm kiếm** theo username và **phân trang** (50/trang), sửa nhãn / xoá tại chỗ.
+- **Trang quản lý theo nhóm** (`/bots/{id}/groups/{source}/senders`, mở từ mỗi nhóm trong "Tuyến forward"): 2 cột — bên trái **tìm & thêm** người từ danh sách chung; bên phải danh sách **đang được phép** với nút xoá. Thêm/xoá **từng người** (không tải cả nghìn checkbox).
+- **Danh sách chung trống = forward mọi người** (mọi nhóm — mặc định cũ).
+- Nhóm **chưa gán ai** = **forward mọi người** ở nhóm đó (mở). Nhóm **có gán ≥1 người** = **chỉ forward những người đó**.
+- Thêm người mới vào danh sách chung → nhớ **gán họ vào các nhóm** cần forward (người chưa gán sẽ bị chặn ở nhóm đã giới hạn).
+- Đặt **nhãn** cho username → tin hiển thị **`[Tên] nội dung`** (áp dụng cho mọi tin của người có nhãn, kể cả nhóm mở):
   - Giữ nguyên định dạng gốc (in đậm/link/emoji).
   - Ảnh/video/file: nhãn ghép vào caption. Tin không chữ (sticker, poll…): gửi 1 tin `[Tên]` ngay trước.
   - Để trống nhãn = không gắn. Nhãn ≤32 ký tự, không chứa `[` `]` / xuống dòng.

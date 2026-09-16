@@ -17,7 +17,7 @@ from app.db import get_session
 from app.forwarding import build_jobs
 from app.models import AllowedSender
 from app.models import Bot as BotModel
-from app.models import Route
+from app.models import Route, SenderGroupAssignment
 
 logger = logging.getLogger(__name__)
 
@@ -41,15 +41,30 @@ async def receive_update(
     update = await request.json()
     routes = session.exec(select(Route).where(Route.bot_id == bot_id)).all()
 
-    # The allowlist is global per bot: {username: label}. Empty -> forward all.
-    allowed_senders: dict[str, str | None] = {
-        row.username: row.label
-        for row in session.exec(
-            select(AllowedSender).where(AllowedSender.bot_id == bot_id)
-        ).all()
-    }
+    # Single LEFT JOIN: the bot's senders + their per-group assignments in one
+    # round-trip (no 1000-id IN-list -> sidesteps SQLite's parameter limit).
+    # A source appears in allowed_by_source only if it has ≥1 assignment
+    # (absence => 'open' group); never store an empty set for a source.
+    label_map: dict[str, str | None] = {}
+    allowed_by_source: dict[int, dict[str, str | None]] = {}
+    for snd, assign in session.exec(
+        select(AllowedSender, SenderGroupAssignment)
+        .join(
+            SenderGroupAssignment,
+            AllowedSender.id == SenderGroupAssignment.allowed_sender_id,
+            isouter=True,
+        )
+        .where(AllowedSender.bot_id == bot_id)
+    ).all():
+        label_map[snd.username] = snd.label
+        if assign is not None:
+            allowed_by_source.setdefault(assign.source_chat_id, {})[snd.username] = snd.label
+    gate_active = bool(label_map)  # no senders -> forward everyone (legacy)
 
-    jobs = build_jobs(update, bot_row.telegram_bot_id, routes, bot_id, allowed_senders)
+    jobs = build_jobs(
+        update, bot_row.telegram_bot_id, routes, bot_id,
+        allowed_by_source, label_map, gate_active,
+    )
     for job in jobs:
         session.add(job)
     session.commit()  # durable before we ack -> no inbound loss
