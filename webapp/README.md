@@ -57,9 +57,9 @@ pytest
 Kiểm thử thật (mã hoá, logic forward, auth, webhook secret), không mock/không gọi mạng.
 
 ## Người gửi được forward + nhãn
-Mỗi **nhóm nguồn** quản lý ở 1 chỗ (trang bot → mục **"Người gửi được forward + nhãn"**):
+**Một danh sách chung cho cả bot** (trang bot → mục **"Người gửi được forward + nhãn (áp dụng cho MỌI nhóm)"**) — không cần vào từng nhóm:
 - **Danh sách trống = forward mọi người** (mặc định).
-- Thêm `username` (không cần `@`) → **chỉ forward những người đó**. Tick **"Cả 2 phía"** để áp cả nhóm đối diện của bridge.
+- Thêm `username` (không cần `@`) → **chỉ forward những người đó**, áp dụng cho **tất cả các nhóm** của bot.
 - Đặt **nhãn** cho username → tin hiển thị **`[Tên] nội dung`**:
   - Giữ nguyên định dạng gốc (in đậm/link/emoji).
   - Ảnh/video/file: nhãn ghép vào caption. Tin không chữ (sticker, poll…): gửi 1 tin `[Tên]` ngay trước.

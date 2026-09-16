@@ -207,15 +207,15 @@ def build_jobs(
     telegram_bot_id: int,
     routes: Sequence[Route],
     bot_id: int,
-    sender_map: dict[int, dict[str, str | None]] | None = None,
+    allowed_senders: dict[str, str | None] | None = None,
 ) -> list[ForwardJob]:
     """Turn one update into durable outbox jobs (pure — inserts happen later).
 
     Jobs are created per destination in a deterministic order, so their row ids
     preserve the source message order for each destination chat.
 
-    ``sender_map`` maps source_chat_id -> {username: label_or_None}. A source
-    with a non-empty map only forwards those usernames (allowlist); an empty /
+    ``allowed_senders`` is the bot's global allowlist: {username: label_or_None}.
+    A non-empty map forwards only those usernames (from any group); an empty /
     missing map forwards everyone. A username's label (if set) prefixes its
     forwarded messages with '[label]'. Commands (/chatid, /start) are never gated.
     """
@@ -242,12 +242,12 @@ def build_jobs(
             )
         ]
 
-    # forward -> gate by the source group's allowlist, then one job per dest
-    group = (sender_map or {}).get(action.source_chat_id, {})
-    if not is_sender_allowed(action.sender_username, set(group.keys())):
+    # forward -> gate by the bot's global allowlist, then one job per dest
+    allowed = allowed_senders or {}
+    if not is_sender_allowed(action.sender_username, set(allowed.keys())):
         return []
 
-    label = group.get(action.sender_username) if action.sender_username else None
+    label = allowed.get(action.sender_username) if action.sender_username else None
     msg = update.get("message") or update.get("edited_message") or {}
 
     jobs: list[ForwardJob] = []

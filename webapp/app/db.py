@@ -6,7 +6,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from sqlalchemy import event, inspect
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.config import get_settings
 
@@ -39,6 +39,7 @@ if _url.startswith("sqlite"):
 def create_db_and_tables() -> None:
     SQLModel.metadata.create_all(engine)
     _add_missing_columns()
+    _collapse_allowed_senders_to_global()
 
 
 def _add_missing_columns() -> None:
@@ -62,6 +63,45 @@ def _add_missing_columns() -> None:
                 conn.exec_driver_sql(
                     f'ALTER TABLE "{table.name}" ADD COLUMN "{col.name}" {ddl_type}'
                 )
+
+
+def _collapse_allowed_senders_to_global() -> None:
+    """One-time data migration: the allowlist used to be per source group; it is
+    now global per bot. Move every AllowedSender row into the GLOBAL_SOURCE (0)
+    bucket, deduping by (bot_id, username) and keeping any non-empty label.
+
+    Idempotent: a no-op once every row already lives in the global bucket.
+    """
+    from app.models import GLOBAL_SOURCE, AllowedSender
+
+    if not inspect(engine).has_table("allowedsender"):
+        return
+    with Session(engine) as session:
+        legacy = session.exec(
+            select(AllowedSender).where(AllowedSender.source_chat_id != GLOBAL_SOURCE)
+        ).all()
+        if not legacy:
+            return
+        # Global rows already present, keyed by (bot_id, username) to merge into.
+        kept: dict[tuple[int, str], AllowedSender] = {
+            (r.bot_id, r.username): r
+            for r in session.exec(
+                select(AllowedSender).where(AllowedSender.source_chat_id == GLOBAL_SOURCE)
+            ).all()
+        }
+        for row in legacy:
+            key = (row.bot_id, row.username)
+            existing = kept.get(key)
+            if existing is None:
+                row.source_chat_id = GLOBAL_SOURCE  # promote this row to global
+                session.add(row)
+                kept[key] = row
+            else:
+                if existing.label is None and row.label is not None:
+                    existing.label = row.label  # keep a label if any duplicate had one
+                    session.add(existing)
+                session.delete(row)  # drop the now-redundant per-group duplicate
+        session.commit()
 
 
 def get_session() -> Iterator[Session]:

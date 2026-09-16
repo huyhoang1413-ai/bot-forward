@@ -119,16 +119,16 @@ async def bot_detail(bot_id: int, request: Request, session: Session = Depends(g
         return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
     routes = session.exec(select(Route).where(Route.bot_id == bot_id)).all()
 
-    # Distinct source groups (in insertion order) + their allowlists.
+    # Distinct source groups (in insertion order), for the routes list.
     source_groups: list[int] = []
     for r in routes:
         if r.source_chat_id not in source_groups:
             source_groups.append(r.source_chat_id)
-    allowed: dict[int, list[AllowedSender]] = {g: [] for g in source_groups}
-    for row in session.exec(
+
+    # Bot-wide allowlist (applies to every group).
+    allowed_senders = session.exec(
         select(AllowedSender).where(AllowedSender.bot_id == bot_id)
-    ).all():
-        allowed.setdefault(row.source_chat_id, []).append(row)
+    ).all()
 
     return templates.TemplateResponse(
         request,
@@ -137,7 +137,7 @@ async def bot_detail(bot_id: int, request: Request, session: Session = Depends(g
             "bot": bot,
             "routes": routes,
             "source_groups": source_groups,
-            "allowed": allowed,
+            "allowed_senders": allowed_senders,
             "has_password": bool(bot.access_password_hash),
             "error": request.query_params.get("error"),
         },
@@ -183,10 +183,8 @@ async def remove_bot(bot_id: int, session: Session = Depends(get_session)):
 )
 async def create_allowed(
     bot_id: int,
-    source_chat_id: int = Form(...),
     username: str = Form(...),
     label: str = Form(""),
-    both_ways: bool = Form(False),
     session: Session = Depends(get_session),
 ):
     if not is_valid_username(username):
@@ -197,19 +195,7 @@ async def create_allowed(
         return RedirectResponse(
             f"/bots/{bot_id}?error=bad_label", status_code=status.HTTP_303_SEE_OTHER
         )
-    # Only allow adding to a real source group of this bot (avoids orphan rows).
-    valid_source = session.exec(
-        select(Route.source_chat_id).where(
-            Route.bot_id == bot_id, Route.source_chat_id == source_chat_id
-        )
-    ).first()
-    if valid_source is None:
-        return RedirectResponse(
-            f"/bots/{bot_id}?error=bad_source", status_code=status.HTTP_303_SEE_OTHER
-        )
-    services.add_allowed_sender(
-        session, bot_id, source_chat_id, username, both_ways, label=label
-    )
+    services.add_allowed_sender(session, bot_id, username, label=label)
     return RedirectResponse(f"/bots/{bot_id}", status_code=status.HTTP_303_SEE_OTHER)
 
 

@@ -39,7 +39,7 @@ def test_add_valid_username_via_ui(client):
     bid = _make_bot(5101)
     r = client.post(
         f"/bots/{bid}/allowed",
-        data={"source_chat_id": "10", "username": "Alice"},
+        data={"username": "Alice"},
         follow_redirects=False,
     )
     assert r.status_code == 303
@@ -51,7 +51,7 @@ def test_invalid_username_via_ui_is_rejected(client):
     bid = _make_bot(5102)
     r = client.post(
         f"/bots/{bid}/allowed",
-        data={"source_chat_id": "10", "username": "ab"},  # too short
+        data={"username": "ab"},  # too short
         follow_redirects=False,
     )
     assert r.status_code == 303
@@ -64,7 +64,7 @@ def test_remove_allowed_via_ui(client):
     bid = _make_bot(5103)
     client.post(
         f"/bots/{bid}/allowed",
-        data={"source_chat_id": "10", "username": "alice"},
+        data={"username": "alice"},
         follow_redirects=False,
     )
     row_id = _rows(bid)[0].id
@@ -73,24 +73,32 @@ def test_remove_allowed_via_ui(client):
     assert _rows(bid) == []
 
 
-def test_add_to_non_source_group_is_rejected(client):
+def test_add_allowed_applies_without_a_route(client):
+    # The allowlist is global per bot; a sender can be added even with no routes.
     _login(client)
-    bid = _make_bot(5104, source=10, dest=20)
+    with Session(engine) as s:
+        bot = Bot(
+            telegram_bot_id=5104, username="u",
+            token_encrypted=encrypt_token("123:fake"), webhook_secret="s",
+        )
+        s.add(bot)
+        s.commit()
+        s.refresh(bot)
+        bid = bot.id
     r = client.post(
         f"/bots/{bid}/allowed",
-        data={"source_chat_id": "999", "username": "alice"},  # 999 not a source
+        data={"username": "alice"},
         follow_redirects=False,
     )
     assert r.status_code == 303
-    assert "bad_source" in r.headers["location"]
-    assert _rows(bid) == []
+    assert [x.username for x in _rows(bid)] == ["alice"]
 
 
 def test_allowed_routes_require_login(client):
     # No login -> redirected to /login.
     r = client.post(
         "/bots/1/allowed",
-        data={"source_chat_id": "10", "username": "alice"},
+        data={"username": "alice"},
         follow_redirects=False,
     )
     assert r.status_code == 303

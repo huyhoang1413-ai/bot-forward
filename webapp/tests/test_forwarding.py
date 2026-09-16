@@ -137,32 +137,34 @@ def test_allowed_blocks_missing_username_when_list_set():
     assert is_sender_allowed(None, {"alice"}) is False
 
 
-# --- build_jobs with per-source allowlist ---
+# --- build_jobs with the bot's global allowlist ---
 
 def test_build_jobs_forwards_only_allowed_sender():
     routes = [_route(10, 20)]
-    amap = {10: {"alice": None}}
+    allowed = {"alice": None}
     # allowed sender (username normalized in decide_action)
-    jobs = build_jobs(_msg(10, 5, username="Alice"), 999, routes, 1, amap)
+    jobs = build_jobs(_msg(10, 5, username="Alice"), 999, routes, 1, allowed)
     assert [j.dest_chat_id for j in jobs] == [20]
     # not allowed
-    assert build_jobs(_msg(10, 5, username="bob"), 999, routes, 1, amap) == []
+    assert build_jobs(_msg(10, 5, username="bob"), 999, routes, 1, allowed) == []
     # no username -> blocked
-    assert build_jobs(_msg(10, 5), 999, routes, 1, amap) == []
+    assert build_jobs(_msg(10, 5), 999, routes, 1, allowed) == []
 
 
 def test_build_jobs_empty_allowlist_forwards_all():
     routes = [_route(10, 20)]
-    # no allowed_map (backward compatible) and empty map both allow all
+    # no allowlist (backward compatible) and empty map both allow all
     assert len(build_jobs(_msg(10, 5, username="bob"), 999, routes, 1)) == 1
     assert len(build_jobs(_msg(10, 5), 999, routes, 1, {})) == 1
 
 
-def test_build_jobs_allowlist_only_affects_its_source():
+def test_build_jobs_global_allowlist_applies_to_every_source():
     routes = [_route(10, 20), _route(11, 20)]
-    amap = {10: {"alice": None}}  # only group 10 restricted
-    # group 11 has no restriction -> forwards anyone
-    assert len(build_jobs(_msg(11, 5, username="bob"), 999, routes, 1, amap)) == 1
+    allowed = {"alice": None}  # global: gates BOTH source groups
+    assert len(build_jobs(_msg(10, 5, username="alice"), 999, routes, 1, allowed)) == 1
+    assert len(build_jobs(_msg(11, 5, username="alice"), 999, routes, 1, allowed)) == 1
+    # a sender not on the list is blocked regardless of which group they post in
+    assert build_jobs(_msg(11, 5, username="bob"), 999, routes, 1, allowed) == []
 
 
 # --- display labels ---
@@ -198,7 +200,7 @@ def test_classify_message():
 def test_labeled_text_prefixes_and_shifts_entities():
     upd = _lmsg(10, 5, "alice", text="hi",
                 entities=[{"type": "bold", "offset": 0, "length": 2}])
-    jobs = build_jobs(upd, 999, [_route(10, 20)], 1, {10: {"alice": "Doby"}})
+    jobs = build_jobs(upd, 999, [_route(10, 20)], 1, {"alice": "Doby"})
     assert len(jobs) == 1 and jobs[0].kind == "text"
     assert jobs[0].text == "[Doby] hi"
     ents = json.loads(jobs[0].entities_json)
@@ -208,7 +210,7 @@ def test_labeled_text_prefixes_and_shifts_entities():
 def test_labeled_caption_media_overrides_caption():
     upd = _lmsg(10, 5, "alice", photo=[{"file_id": "x"}], caption="pic",
                 caption_entities=[{"type": "italic", "offset": 0, "length": 3}])
-    jobs = build_jobs(upd, 999, [_route(10, 20)], 1, {10: {"alice": "Doby"}})
+    jobs = build_jobs(upd, 999, [_route(10, 20)], 1, {"alice": "Doby"})
     assert len(jobs) == 1 and jobs[0].kind == "copy_caption"
     assert jobs[0].caption == "[Doby] pic"
     assert json.loads(jobs[0].caption_entities_json)[0]["offset"] == 7
@@ -216,24 +218,24 @@ def test_labeled_caption_media_overrides_caption():
 
 def test_labeled_media_without_caption_uses_label_only():
     upd = _lmsg(10, 5, "alice", photo=[{"file_id": "x"}])
-    jobs = build_jobs(upd, 999, [_route(10, 20)], 1, {10: {"alice": "Doby"}})
+    jobs = build_jobs(upd, 999, [_route(10, 20)], 1, {"alice": "Doby"})
     assert jobs[0].kind == "copy_caption" and jobs[0].caption == "[Doby]"
 
 
 def test_labeled_other_type_label_line_then_copy_in_order():
     upd = _lmsg(10, 5, "alice", sticker={"file_id": "s"})
-    jobs = build_jobs(upd, 999, [_route(10, 20)], 1, {10: {"alice": "Doby"}})
+    jobs = build_jobs(upd, 999, [_route(10, 20)], 1, {"alice": "Doby"})
     assert [j.kind for j in jobs] == ["text", "copy"]
     assert jobs[0].text == "[Doby]"
 
 
 def test_allowed_without_label_is_plain_copy():
     upd = _lmsg(10, 5, "alice", text="hi")
-    jobs = build_jobs(upd, 999, [_route(10, 20)], 1, {10: {"alice": None}})
+    jobs = build_jobs(upd, 999, [_route(10, 20)], 1, {"alice": None})
     assert len(jobs) == 1 and jobs[0].kind == "copy" and jobs[0].entities_json is None
 
 
 def test_labeled_text_over_limit_falls_back_to_plain_copy():
     upd = _lmsg(10, 5, "alice", text="x" * 4096)  # + prefix exceeds 4096
-    jobs = build_jobs(upd, 999, [_route(10, 20)], 1, {10: {"alice": "Doby"}})
+    jobs = build_jobs(upd, 999, [_route(10, 20)], 1, {"alice": "Doby"})
     assert jobs[0].kind == "copy"  # delivered unlabeled, not dropped

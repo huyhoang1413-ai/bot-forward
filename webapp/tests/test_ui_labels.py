@@ -36,7 +36,7 @@ def test_add_allowed_with_label_via_ui(client):
     bid = _make_bot(6101)
     r = client.post(
         f"/bots/{bid}/allowed",
-        data={"source_chat_id": "10", "username": "@Alice", "label": "Doby"},
+        data={"username": "@Alice", "label": "Doby"},
         follow_redirects=False,
     )
     assert r.status_code == 303
@@ -49,7 +49,7 @@ def test_invalid_label_via_ui_rejected(client):
     bid = _make_bot(6102)
     r = client.post(
         f"/bots/{bid}/allowed",
-        data={"source_chat_id": "10", "username": "alice", "label": "bad[bracket]"},
+        data={"username": "alice", "label": "bad[bracket]"},
         follow_redirects=False,
     )
     assert r.status_code == 303
@@ -61,7 +61,7 @@ def test_edit_label_via_ui(client):
     _login(client)
     bid = _make_bot(6103)
     client.post(f"/bots/{bid}/allowed",
-                data={"source_chat_id": "10", "username": "alice"},
+                data={"username": "alice"},
                 follow_redirects=False)
     row_id = _rows(bid)[0].id
     client.post(f"/bots/{bid}/allowed/{row_id}/label",

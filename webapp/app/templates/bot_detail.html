@@ -4,7 +4,6 @@
 <p><a href="/">← Về danh sách</a></p>
 
 {% if error == "bad_username" %}<div class="err">Username không hợp lệ (5–32 ký tự: chữ, số, gạch dưới).</div>{% endif %}
-{% if error == "bad_source" %}<div class="err">Nhóm nguồn không hợp lệ (phải là nguồn của một tuyến đã có).</div>{% endif %}
 {% if error == "bad_label" %}<div class="err">Nhãn không hợp lệ (1–32 ký tự, không chứa [ ] hoặc xuống dòng).</div>{% endif %}
 
 <div class="card">
@@ -29,9 +28,41 @@
 </div>
 
 <div class="card">
-  <h3 style="margin-top:0;font-size:15px">Tuyến & người gửi ({{ source_groups|length }} nhóm nguồn)</h3>
-  <p class="muted">Mỗi nhóm nguồn: chuyển tới đâu + ai được forward. Danh sách người gửi để trống → forward mọi người.
-  Đặt <b>nick name</b> để tin hiển thị dạng <b>[Tên] nội dung</b>.</p>
+  <h3 style="margin-top:0;font-size:15px">Người gửi được forward + nhãn (áp dụng cho MỌI nhóm)</h3>
+  <p class="muted">Danh sách chung cho cả bot — không cần vào từng nhóm. Để trống → <b>forward mọi người</b>.
+  Thêm username → <b>chỉ forward những người đó</b> ở tất cả các nhóm. Đặt <b>nick name</b> để tin hiển thị dạng <b>[Tên] nội dung</b>.</p>
+
+  {% if allowed_senders %}
+  <table>
+    <thead><tr><th>Username</th><th>Nick Name</th><th></th></tr></thead>
+    <tbody>
+      {% for a in allowed_senders %}
+      <tr>
+        <td>@{{ a.username }}</td>
+        <td>{{ a.label or '—' }}</td>
+        <td style="text-align:right">
+          <form method="post" action="/bots/{{ bot.id }}/allowed/{{ a.id }}/delete" style="margin:0">
+            <button class="ghost" type="submit">Xoá</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">Không giới hạn — đang forward mọi người.</p>
+  {% endif %}
+
+  <form method="post" action="/bots/{{ bot.id }}/allowed" class="row" style="margin-top:8px">
+    <div><input type="text" name="username" placeholder="username (không cần @)" required></div>
+    <div><input type="text" name="label" placeholder="nick name (tuỳ chọn)"></div>
+    <div style="flex:0 0 auto"><button type="submit">Thêm</button></div>
+  </form>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;font-size:15px">Tuyến forward ({{ source_groups|length }} nhóm nguồn)</h3>
+  <p class="muted">Mỗi nhóm nguồn chuyển tin tới nhóm đích tương ứng.</p>
 
   {% if not source_groups %}
   <p class="muted">Chưa có tuyến nào. Thêm tuyến ở khung phía trên.</p>
@@ -41,39 +72,11 @@
   <details class="group">
     <summary>
       <b>{{ g }}</b> → <b>{% for r in routes if r.source_chat_id == g %}{{ r.dest_chat_id }}{% if not loop.last %}, {% endif %}{% endfor %}</b>
-      <span class="muted" style="font-size:12px"> · {{ allowed[g]|length }} người{% if not allowed[g] %} (mọi người){% endif %}</span>
     </summary>
     <div style="margin-top:10px">
-      {% if allowed[g] %}
-      <table>
-        <thead><tr><th>Username</th><th>Nick Name</th><th></th></tr></thead>
-        <tbody>
-          {% for a in allowed[g] %}
-          <tr>
-            <td>@{{ a.username }}</td>
-            <td>{{ a.label or '—' }}</td>
-            <td style="text-align:right">
-              <form method="post" action="/bots/{{ bot.id }}/allowed/{{ a.id }}/delete" style="margin:0">
-                <button class="ghost" type="submit">Xoá</button>
-              </form>
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      {% else %}
-      <span class="muted">Không giới hạn — forward mọi người.</span>
-      {% endif %}
-      <form method="post" action="/bots/{{ bot.id }}/allowed" class="row" style="margin-top:8px">
-        <input type="hidden" name="source_chat_id" value="{{ g }}">
-        <div><input type="text" name="username" placeholder="username (không cần @)" required></div>
-        <div><input type="text" name="label" placeholder="nick name (tuỳ chọn)"></div>
-        <label style="flex:0 0 auto"><input type="checkbox" name="both_ways" value="true"> Cả 2 phía</label>
-        <div style="flex:0 0 auto"><button type="submit">Thêm</button></div>
-      </form>
       {% for r in routes if r.source_chat_id == g %}
-      <form method="post" action="/bots/{{ bot.id }}/routes/{{ r.id }}/delete" style="margin-top:10px; display:inline-block">
-        <button class="ghost" type="submit" style="font-size:12px">Xoá tuyến này</button>
+      <form method="post" action="/bots/{{ bot.id }}/routes/{{ r.id }}/delete" style="margin-top:4px; display:inline-block">
+        <button class="ghost" type="submit" style="font-size:12px">Xoá tuyến {{ g }} → {{ r.dest_chat_id }}</button>
       </form>
       {% endfor %}
     </div>

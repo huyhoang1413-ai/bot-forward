@@ -10,7 +10,7 @@ from sqlmodel import Session, select
 from app import botcache, telegram_api
 from app.crypto import decrypt_token, encrypt_token
 from app.forwarding import normalize_username
-from app.models import AllowedSender, Bot, ForwardJob, Route
+from app.models import GLOBAL_SOURCE, AllowedSender, Bot, ForwardJob, Route
 from app.pw import hash_password
 
 logger = logging.getLogger(__name__)
@@ -141,49 +141,39 @@ def delete_route(session: Session, route_id: int, bot_id: int | None = None) -> 
 def add_allowed_sender(
     session: Session,
     bot_id: int,
-    source_chat_id: int,
     username: str,
-    both_ways: bool = False,
     label: str | None = None,
-) -> list[AllowedSender]:
-    """Add a username to a source group's allowlist (normalized, deduped).
+) -> AllowedSender:
+    """Add a username to the bot's global allowlist (normalized, deduped).
 
-    ``both_ways`` also adds it to the group's bridge partner(s) — the dest chats
-    it forwards to — so a bidirectional bridge is covered in one action.
-    ``label`` (optional) sets the display name; on an existing row it updates it.
+    The list is bot-wide: a listed username is forwarded from ALL of the bot's
+    groups. ``label`` (optional) sets the display name; on an existing row it
+    updates it.
     """
     username = normalize_username(username)
     label = (label or "").strip() or None
-    targets = {source_chat_id}
-    if both_ways:
-        dests = session.exec(
-            select(Route.dest_chat_id).where(
-                Route.bot_id == bot_id, Route.source_chat_id == source_chat_id
-            )
-        ).all()
-        targets.update(dests)
 
-    created: list[AllowedSender] = []
-    for chat_id in targets:
-        exists = session.exec(
-            select(AllowedSender).where(
-                AllowedSender.bot_id == bot_id,
-                AllowedSender.source_chat_id == chat_id,
-                AllowedSender.username == username,
-            )
-        ).first()
-        if exists:
-            if label is not None:
-                exists.label = label
-                session.add(exists)
-            continue
-        row = AllowedSender(
-            bot_id=bot_id, source_chat_id=chat_id, username=username, label=label
+    exists = session.exec(
+        select(AllowedSender).where(
+            AllowedSender.bot_id == bot_id,
+            AllowedSender.source_chat_id == GLOBAL_SOURCE,
+            AllowedSender.username == username,
         )
-        session.add(row)
-        created.append(row)
+    ).first()
+    if exists:
+        if label is not None:
+            exists.label = label
+            session.add(exists)
+        session.commit()
+        return exists
+
+    row = AllowedSender(
+        bot_id=bot_id, source_chat_id=GLOBAL_SOURCE, username=username, label=label
+    )
+    session.add(row)
     session.commit()
-    return created
+    session.refresh(row)
+    return row
 
 
 def set_bot_password(session: Session, bot_id: int, password: str) -> None:

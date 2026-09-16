@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import hmac
 import logging
-from collections import defaultdict
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlmodel import Session, select
@@ -42,13 +41,15 @@ async def receive_update(
     update = await request.json()
     routes = session.exec(select(Route).where(Route.bot_id == bot_id)).all()
 
-    sender_map: dict[int, dict[str, str | None]] = defaultdict(dict)
-    for row in session.exec(
-        select(AllowedSender).where(AllowedSender.bot_id == bot_id)
-    ).all():
-        sender_map[row.source_chat_id][row.username] = row.label
+    # The allowlist is global per bot: {username: label}. Empty -> forward all.
+    allowed_senders: dict[str, str | None] = {
+        row.username: row.label
+        for row in session.exec(
+            select(AllowedSender).where(AllowedSender.bot_id == bot_id)
+        ).all()
+    }
 
-    jobs = build_jobs(update, bot_row.telegram_bot_id, routes, bot_id, sender_map)
+    jobs = build_jobs(update, bot_row.telegram_bot_id, routes, bot_id, allowed_senders)
     for job in jobs:
         session.add(job)
     session.commit()  # durable before we ack -> no inbound loss

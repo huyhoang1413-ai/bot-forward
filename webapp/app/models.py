@@ -42,9 +42,16 @@ class Route(SQLModel, table=True):
     created_at: datetime = Field(default_factory=_now)
 
 
+GLOBAL_SOURCE = 0  # sentinel source_chat_id: sender applies to ALL of the bot's groups
+
+
 class AllowedSender(SQLModel, table=True):
-    """Per-source-group sender entry. Empty (no rows for a source) means
-    'no restriction' — forward everyone from that group.
+    """A bot-wide allowed-sender entry. Empty (no rows for a bot) means
+    'no restriction' — forward everyone. A non-empty list forwards only the
+    listed usernames, across ALL of the bot's source groups.
+
+    ``source_chat_id`` is kept for schema stability but always holds
+    ``GLOBAL_SOURCE`` (0); the list is global per bot, not per group.
 
     ``label`` (optional) is a display name: messages from this user are
     forwarded with a '[label]' prefix.
@@ -52,7 +59,7 @@ class AllowedSender(SQLModel, table=True):
 
     id: int | None = Field(default=None, primary_key=True)
     bot_id: int = Field(index=True)
-    source_chat_id: int = Field(index=True)
+    source_chat_id: int = Field(default=GLOBAL_SOURCE, index=True)
     username: str  # normalized: lowercase, no leading '@'
     label: str | None = None
     created_at: datetime = Field(default_factory=_now)
