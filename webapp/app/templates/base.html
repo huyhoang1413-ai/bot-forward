@@ -36,9 +36,17 @@
   <div class="wrap">
     <header>
       <h1><a href="/">🤖 Bot Forward Panel</a></h1>
-      <form method="post" action="/logout" style="margin:0">
-        <button class="ghost" type="submit">Logout</button>
-      </form>
+      <div style="display:flex; align-items:center; gap:12px">
+        {% if request.session.get("username") %}
+        <span class="muted" style="font-size:13px">
+          {{ request.session.get("username") }}{% if request.session.get("team_name") %} · {{ request.session.get("team_name") }}{% endif %}{% if request.session.get("is_admin") %} · admin{% endif %}
+        </span>
+        {% if request.session.get("is_admin") %}<a href="/admin" style="font-size:13px">Quản trị</a>{% endif %}
+        {% endif %}
+        <form method="post" action="/logout" style="margin:0">
+          <button class="ghost" type="submit">Logout</button>
+        </form>
+      </div>
     </header>
     {% block content %}{% endblock %}
   </div>

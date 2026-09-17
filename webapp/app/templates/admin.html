@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}Quản trị — Bot Forward Panel{% endblock %}
+{% block content %}
+
+<p><a href="/">← Về danh sách bot</a></p>
+
+{% if error == "team" %}<div class="err">Tên team không hợp lệ hoặc đã tồn tại.</div>{% endif %}
+{% if error == "team_not_empty" %}<div class="err">Không xoá được: team vẫn còn user hoặc bot. Chuyển/ xoá chúng trước.</div>{% endif %}
+{% if error == "user" %}<div class="err">Không tạo được user: username trống/trùng hoặc team không hợp lệ.</div>{% endif %}
+{% if error == "pw_short" %}<div class="err">Mật khẩu phải từ 8 ký tự trở lên.</div>{% endif %}
+
+<div class="card">
+  <h2 style="margin-top:0;font-size:16px">Teams ({{ teams|length }})</h2>
+  <form method="post" action="/admin/teams" class="row" style="margin-bottom:12px">
+    <div><input type="text" name="name" placeholder="Tên team mới" required></div>
+    <div style="flex:0 0 auto"><button type="submit">Thêm team</button></div>
+  </form>
+  {% if teams %}
+  <table>
+    <thead><tr><th>Tên</th><th></th></tr></thead>
+    <tbody>
+      {% for t in teams %}
+      <tr>
+        <td>{{ t.name }}</td>
+        <td style="text-align:right">
+          <form method="post" action="/admin/teams/{{ t.id }}/delete" style="margin:0"
+                onsubmit="return confirm('Xoá team {{ t.name }}?')">
+            <button class="ghost" type="submit">Xoá</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">Chưa có team nào.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0;font-size:16px">Users ({{ users|length }})</h2>
+  <form method="post" action="/admin/users" class="row" style="margin-bottom:12px">
+    <div><input type="text" name="username" placeholder="username" required></div>
+    <div><input type="text" name="password" placeholder="mật khẩu (≥8 ký tự)" required></div>
+    <div style="flex:0 0 auto">
+      <select name="team_id" required style="padding:9px 11px; background:#0b1220; border:1px solid #334155; border-radius:8px; color:#e2e8f0">
+        {% for t in teams %}<option value="{{ t.id }}">{{ t.name }}</option>{% endfor %}
+      </select>
+    </div>
+    <div style="flex:0 0 auto"><button type="submit">Thêm user</button></div>
+  </form>
+  {% if not teams %}<p class="muted">Tạo team trước khi thêm user.</p>{% endif %}
+  {% if users %}
+  <table>
+    <thead><tr><th>Username</th><th>Team</th><th>Đổi mật khẩu</th><th></th></tr></thead>
+    <tbody>
+      {% for u in users %}
+      <tr>
+        <td>{{ u.username }}</td>
+        <td class="muted">{{ team_name_by_id.get(u.team_id, "—") }}</td>
+        <td>
+          <form method="post" action="/admin/users/{{ u.id }}/password" style="display:flex; gap:6px; margin:0">
+            <input type="text" name="password" placeholder="mật khẩu mới (≥8)" style="max-width:180px">
+            <button class="ghost" type="submit" style="font-size:12px">Lưu</button>
+          </form>
+        </td>
+        <td style="text-align:right">
+          <form method="post" action="/admin/users/{{ u.id }}/delete" style="margin:0"
+                onsubmit="return confirm('Xoá user {{ u.username }}?')">
+            <button class="ghost" type="submit">Xoá</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">Chưa có user nào.</p>
+  {% endif %}
+</div>
+
+{% endblock %}

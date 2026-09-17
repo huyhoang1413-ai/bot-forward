@@ -10,10 +10,11 @@ from fastapi.templating import Jinja2Templates
 from sqlmodel import Session, select
 
 from app import services, telegram_api
-from app.auth import require_admin, require_bot_access, unlock_bot
+from app.auth import require_auth, require_bot_access, unlock_bot
 from app.db import get_session
 from app.forwarding import is_valid_label, is_valid_username
-from app.models import Bot, Route
+from app.auth import require_super_admin
+from app.models import Bot, Route, Team
 from app.pw import verify_password
 
 router = APIRouter()
@@ -32,30 +33,46 @@ async def login_page(request: Request, error: int = 0):
     )
 
 
-@router.get("/", response_class=HTMLResponse, dependencies=[Depends(require_admin)])
+@router.get("/", response_class=HTMLResponse, dependencies=[Depends(require_auth)])
 async def dashboard(request: Request, session: Session = Depends(get_session)):
-    bots = session.exec(select(Bot)).all()
+    admin = bool(request.session.get("is_admin"))
+    tid = request.session.get("team_id")
+    bots = services.visible_bots(session, tid, admin)
     counts = {
         b.id: len(session.exec(select(Route).where(Route.bot_id == b.id)).all())
         for b in bots
     }
+    team_name_by_id = {t.id: t.name for t in services.list_teams(session)} if admin else {}
     return templates.TemplateResponse(
         request,
         "dashboard.html",
         {"bots": bots, "counts": counts,
+         "is_admin": admin,
+         "teams": services.list_teams(session) if admin else [],
+         "team_name_by_id": team_name_by_id,
          "error": request.query_params.get("error")},
     )
 
 
-@router.post("/bots", dependencies=[Depends(require_admin)])
+@router.post("/bots", dependencies=[Depends(require_auth)])
 async def create_bot(
     request: Request,
     token: str = Form(...),
     access_password: str = Form(""),
+    team_id: str = Form(""),
     session: Session = Depends(get_session),
 ):
+    # Owning team: super-admin picks (blank = admin-only); a member -> own team.
+    if request.session.get("is_admin"):
+        owner_team_id = int(team_id) if team_id.strip() else None
+    else:
+        owner_team_id = request.session.get("team_id")
+        if owner_team_id is None:
+            return RedirectResponse("/?error=no_team", status_code=status.HTTP_303_SEE_OTHER)
     try:
-        bot = await services.add_bot(session, token, access_password)
+        bot = await services.add_bot(
+            session, token, access_password, team_id=owner_team_id
+        )
     except telegram_api.InvalidTokenError:
         return RedirectResponse("/?error=invalid_token", status_code=status.HTTP_303_SEE_OTHER)
     except services.DuplicateBotError:
@@ -69,7 +86,7 @@ async def create_bot(
 
 @router.get(
     "/bots/{bot_id}/unlock", response_class=HTMLResponse,
-    dependencies=[Depends(require_admin)],
+    dependencies=[Depends(require_auth)],
 )
 async def unlock_page(
     bot_id: int, request: Request, error: int = 0,
@@ -83,7 +100,7 @@ async def unlock_page(
     )
 
 
-@router.post("/bots/{bot_id}/unlock", dependencies=[Depends(require_admin)])
+@router.post("/bots/{bot_id}/unlock", dependencies=[Depends(require_auth)])
 async def do_unlock(
     bot_id: int, request: Request, password: str = Form(...),
     session: Session = Depends(get_session),
@@ -99,7 +116,7 @@ async def do_unlock(
 
 @router.post(
     "/bots/{bot_id}/password",
-    dependencies=[Depends(require_admin), Depends(require_bot_access)],
+    dependencies=[Depends(require_auth), Depends(require_bot_access)],
 )
 async def set_password(
     bot_id: int,
@@ -115,7 +132,7 @@ async def set_password(
 
 @router.get(
     "/bots/{bot_id}", response_class=HTMLResponse,
-    dependencies=[Depends(require_admin), Depends(require_bot_access)],
+    dependencies=[Depends(require_auth), Depends(require_bot_access)],
 )
 async def bot_detail(bot_id: int, request: Request, session: Session = Depends(get_session)):
     bot = session.get(Bot, bot_id)
@@ -184,7 +201,7 @@ def _page_ctx(total: int, page: int, page_size: int) -> dict:
 
 @router.get(
     "/bots/{bot_id}/senders", response_class=HTMLResponse,
-    dependencies=[Depends(require_admin), Depends(require_bot_access)],
+    dependencies=[Depends(require_auth), Depends(require_bot_access)],
 )
 async def senders_page(
     bot_id: int, request: Request, q: str = "", page: int = 0,
@@ -204,7 +221,7 @@ async def senders_page(
 
 @router.get(
     "/bots/{bot_id}/groups/{source_chat_id}/senders", response_class=HTMLResponse,
-    dependencies=[Depends(require_admin), Depends(require_bot_access)],
+    dependencies=[Depends(require_auth), Depends(require_bot_access)],
 )
 async def group_senders_page(
     bot_id: int, source_chat_id: int, request: Request,
@@ -236,7 +253,7 @@ async def group_senders_page(
 
 @router.post(
     "/bots/{bot_id}/groups/{source_chat_id}/senders/{sender_id}/add",
-    dependencies=[Depends(require_admin), Depends(require_bot_access)],
+    dependencies=[Depends(require_auth), Depends(require_bot_access)],
 )
 async def group_add(
     bot_id: int, source_chat_id: int, sender_id: int,
@@ -251,7 +268,7 @@ async def group_add(
 
 @router.post(
     "/bots/{bot_id}/groups/{source_chat_id}/senders/{sender_id}/remove",
-    dependencies=[Depends(require_admin), Depends(require_bot_access)],
+    dependencies=[Depends(require_auth), Depends(require_bot_access)],
 )
 async def group_remove(
     bot_id: int, source_chat_id: int, sender_id: int,
@@ -275,7 +292,7 @@ def _group_detail_redirect(bot_id: int, source_chat_id: int, error: str = "") ->
 
 @router.post(
     "/bots/{bot_id}/groups/{source_chat_id}/senders-inline/add",
-    dependencies=[Depends(require_admin), Depends(require_bot_access)],
+    dependencies=[Depends(require_auth), Depends(require_bot_access)],
 )
 async def group_inline_add(
     bot_id: int, source_chat_id: int,
@@ -292,7 +309,7 @@ async def group_inline_add(
 
 @router.post(
     "/bots/{bot_id}/groups/{source_chat_id}/senders-inline/{sender_id}/remove",
-    dependencies=[Depends(require_admin), Depends(require_bot_access)],
+    dependencies=[Depends(require_auth), Depends(require_bot_access)],
 )
 async def group_inline_remove(
     bot_id: int, source_chat_id: int, sender_id: int,
@@ -304,7 +321,7 @@ async def group_inline_remove(
 
 @router.post(
     "/bots/{bot_id}/routes",
-    dependencies=[Depends(require_admin), Depends(require_bot_access)],
+    dependencies=[Depends(require_auth), Depends(require_bot_access)],
 )
 async def create_route(
     bot_id: int,
@@ -319,7 +336,7 @@ async def create_route(
 
 @router.post(
     "/bots/{bot_id}/routes/{route_id}/delete",
-    dependencies=[Depends(require_admin), Depends(require_bot_access)],
+    dependencies=[Depends(require_auth), Depends(require_bot_access)],
 )
 async def remove_route(bot_id: int, route_id: int, session: Session = Depends(get_session)):
     services.delete_route(session, route_id, bot_id=bot_id)
@@ -328,7 +345,7 @@ async def remove_route(bot_id: int, route_id: int, session: Session = Depends(ge
 
 @router.post(
     "/bots/{bot_id}/delete",
-    dependencies=[Depends(require_admin), Depends(require_bot_access)],
+    dependencies=[Depends(require_auth), Depends(require_bot_access)],
 )
 async def remove_bot(bot_id: int, session: Session = Depends(get_session)):
     await services.remove_bot(session, bot_id)
@@ -337,7 +354,7 @@ async def remove_bot(bot_id: int, session: Session = Depends(get_session)):
 
 @router.post(
     "/bots/{bot_id}/allowed",
-    dependencies=[Depends(require_admin), Depends(require_bot_access)],
+    dependencies=[Depends(require_auth), Depends(require_bot_access)],
 )
 async def create_allowed(
     bot_id: int,
@@ -363,7 +380,7 @@ async def create_allowed(
 
 @router.post(
     "/bots/{bot_id}/allowed/{allowed_id}/delete",
-    dependencies=[Depends(require_admin), Depends(require_bot_access)],
+    dependencies=[Depends(require_auth), Depends(require_bot_access)],
 )
 async def remove_allowed(
     bot_id: int, allowed_id: int, session: Session = Depends(get_session)
@@ -376,7 +393,7 @@ async def remove_allowed(
 
 @router.post(
     "/bots/{bot_id}/allowed/{allowed_id}/label",
-    dependencies=[Depends(require_admin), Depends(require_bot_access)],
+    dependencies=[Depends(require_auth), Depends(require_bot_access)],
 )
 async def edit_allowed_label(
     bot_id: int,
@@ -393,3 +410,75 @@ async def edit_allowed_label(
     return RedirectResponse(
         f"/bots/{bot_id}/senders", status_code=status.HTTP_303_SEE_OTHER
     )
+
+
+# --- Super-admin: teams & users management ---
+
+@router.get(
+    "/admin", response_class=HTMLResponse,
+    dependencies=[Depends(require_super_admin)],
+)
+async def admin_page(request: Request, session: Session = Depends(get_session)):
+    teams = services.list_teams(session)
+    team_name_by_id = {t.id: t.name for t in teams}
+    users = services.list_users(session)
+    return templates.TemplateResponse(
+        request,
+        "admin.html",
+        {
+            "teams": teams,
+            "users": users,
+            "team_name_by_id": team_name_by_id,
+            "error": request.query_params.get("error"),
+        },
+    )
+
+
+@router.post("/admin/teams", dependencies=[Depends(require_super_admin)])
+async def admin_create_team(
+    name: str = Form(...), session: Session = Depends(get_session)
+):
+    ok = services.create_team(session, name)
+    return RedirectResponse(
+        "/admin" + ("" if ok else "?error=team"), status_code=status.HTTP_303_SEE_OTHER
+    )
+
+
+@router.post("/admin/teams/{team_id}/delete", dependencies=[Depends(require_super_admin)])
+async def admin_delete_team(team_id: int, session: Session = Depends(get_session)):
+    ok = services.delete_team(session, team_id)
+    return RedirectResponse(
+        "/admin" + ("" if ok else "?error=team_not_empty"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/admin/users", dependencies=[Depends(require_super_admin)])
+async def admin_create_user(
+    username: str = Form(...),
+    password: str = Form(...),
+    team_id: int = Form(...),
+    session: Session = Depends(get_session),
+):
+    if len(password) < 8:
+        return RedirectResponse("/admin?error=pw_short", status_code=status.HTTP_303_SEE_OTHER)
+    ok = services.create_user(session, username, password, team_id)
+    return RedirectResponse(
+        "/admin" + ("" if ok else "?error=user"), status_code=status.HTTP_303_SEE_OTHER
+    )
+
+
+@router.post("/admin/users/{user_id}/delete", dependencies=[Depends(require_super_admin)])
+async def admin_delete_user(user_id: int, session: Session = Depends(get_session)):
+    services.delete_user(session, user_id)
+    return RedirectResponse("/admin", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/admin/users/{user_id}/password", dependencies=[Depends(require_super_admin)])
+async def admin_reset_password(
+    user_id: int, password: str = Form(...), session: Session = Depends(get_session)
+):
+    if len(password) < 8:
+        return RedirectResponse("/admin?error=pw_short", status_code=status.HTTP_303_SEE_OTHER)
+    services.reset_user_password(session, user_id, password)
+    return RedirectResponse("/admin", status_code=status.HTTP_303_SEE_OTHER)

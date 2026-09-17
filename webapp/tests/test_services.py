@@ -4,21 +4,27 @@ from sqlmodel import Session, select
 
 from app.crypto import encrypt_token
 from app.db import engine
-from app.models import AllowedSender, Bot, Route, SenderGroupAssignment
+from app.models import AllowedSender, Bot, Route, SenderGroupAssignment, Team
 from app.services import (
     add_allowed_sender,
     add_group_sender,
     add_route,
     add_sender_by_username,
+    can_access_bot,
     count_senders,
+    create_team,
+    create_user,
     delete_allowed_sender,
     delete_route,
+    delete_team,
+    get_user_by_username,
     group_sender_counts,
     list_group_senders,
     list_senders,
     remove_group_sender,
     search_unassigned,
     update_allowed_label,
+    visible_bots,
 )
 
 
@@ -286,3 +292,62 @@ def test_count_helpers():
         add_group_sender(s, bot_id, 10, a.id)
         assert count_senders(s, bot_id) == 2
         assert group_sender_counts(s, bot_id) == {10: 1}
+
+
+# --- multi-tenant: teams / users / visibility ---
+
+def _bot(session, tg_id, team_id=None):
+    b = Bot(
+        telegram_bot_id=tg_id, username=f"b{tg_id}",
+        token_encrypted=encrypt_token("1:x"), webhook_secret="s", team_id=team_id,
+    )
+    session.add(b)
+    session.commit()
+    session.refresh(b)
+    return b
+
+
+def test_team_crud_and_delete_blocked_when_nonempty():
+    with Session(engine) as s:
+        t = create_team(s, "TeamOne")
+        assert t is not None
+        assert create_team(s, "TeamOne") is None          # duplicate
+        assert create_team(s, "  ") is None                # blank
+        # empty team deletes; non-empty (has a bot) is blocked
+        assert delete_team(s, t.id) is True
+        t2 = create_team(s, "TeamTwo")
+        _bot(s, 3001, team_id=t2.id)
+        assert delete_team(s, t2.id) is False
+        assert s.get(Team, t2.id) is not None
+
+
+def test_user_crud_and_lookup():
+    with Session(engine) as s:
+        t = create_team(s, "TeamU")
+        u = create_user(s, "AliceSvc", "secret12", t.id)
+        assert u is not None and u.username == "alicesvc"       # normalized lowercase
+        assert create_user(s, "alicesvc", "secret12", t.id) is None   # dup
+        assert create_user(s, "carolsvc", "secret12", 999999) is None  # bad team
+        assert get_user_by_username(s, "ALICESVC").id == u.id   # case-insensitive
+
+
+def test_visible_bots_and_can_access():
+    with Session(engine) as s:
+        t1 = create_team(s, "V1")
+        t2 = create_team(s, "V2")
+        b1 = _bot(s, 3101, team_id=t1.id)
+        b2 = _bot(s, 3102, team_id=t2.id)
+        admin_only = _bot(s, 3103, team_id=None)
+        # a fresh team sees exactly its own bot
+        assert {b.id for b in visible_bots(s, t1.id, is_admin=False)} == {b1.id}
+        assert {b.id for b in visible_bots(s, t2.id, is_admin=False)} == {b2.id}
+        # no-team member sees nothing
+        assert visible_bots(s, None, is_admin=False) == []
+        # admin sees all (superset incl. these three)
+        admin_ids = {b.id for b in visible_bots(s, None, is_admin=True)}
+        assert {b1.id, b2.id, admin_only.id} <= admin_ids
+        # can_access
+        assert can_access_bot(b1, t1.id, False) is True
+        assert can_access_bot(b2, t1.id, False) is False
+        assert can_access_bot(admin_only, None, True) is True
+        assert can_access_bot(admin_only, t1.id, False) is False

@@ -4,6 +4,7 @@
 {% if error == "invalid_token" %}<div class="err">Token không hợp lệ — Telegram từ chối.</div>{% endif %}
 {% if error == "duplicate" %}<div class="err">Bot này đã được thêm rồi.</div>{% endif %}
 {% if error == "webhook" %}<div class="err">Lưu được token nhưng đăng ký webhook thất bại. Kiểm tra PUBLIC_URL/HTTPS.</div>{% endif %}
+{% if error == "no_team" %}<div class="err">Tài khoản của bạn chưa thuộc team nào — liên hệ admin để được thêm vào team trước khi tạo bot.</div>{% endif %}
 
 <div class="card">
   <h2 style="margin-top:0;font-size:16px">Thêm bot mới</h2>
@@ -13,6 +14,13 @@
     <input type="text" name="token" placeholder="123456:ABC-DEF..." required>
     <label>Mật khẩu truy cập bot (tuỳ chọn)</label>
     <input type="text" name="access_password" placeholder="để trống nếu không khoá">
+    {% if is_admin %}
+    <label>Team sở hữu (admin)</label>
+    <select name="team_id" style="width:100%; padding:9px 11px; background:#0b1220; border:1px solid #334155; border-radius:8px; color:#e2e8f0">
+      <option value="">— Chỉ admin (không gán team) —</option>
+      {% for t in teams %}<option value="{{ t.id }}">{{ t.name }}</option>{% endfor %}
+    </select>
+    {% endif %}
     <div style="margin-top:12px"><button type="submit">Thêm bot</button></div>
   </form>
 </div>
@@ -21,11 +29,12 @@
   <h2 style="margin-top:0;font-size:16px">Bot của bạn ({{ bots|length }})</h2>
   {% if bots %}
   <table>
-    <thead><tr><th>Bot</th><th>Trạng thái</th><th>Tuyến</th><th></th></tr></thead>
+    <thead><tr><th>Bot</th>{% if is_admin %}<th>Team</th>{% endif %}<th>Trạng thái</th><th>Tuyến</th><th></th></tr></thead>
     <tbody>
       {% for b in bots %}
       <tr>
         <td><a href="/bots/{{ b.id }}">@{{ b.username }}</a>{% if b.access_password_hash %} 🔒{% endif %}</td>
+        {% if is_admin %}<td class="muted">{{ team_name_by_id.get(b.team_id, "—") }}</td>{% endif %}
         <td><span class="pill">{{ b.status }}</span></td>
         <td>{{ counts[b.id] }}</td>
         <td style="text-align:right">

@@ -1,4 +1,4 @@
-"""Database models (SQLModel). Single-admin: no users table."""
+"""Database models (SQLModel). Multi-tenant: teams own bots; users belong to a team."""
 
 from __future__ import annotations
 
@@ -18,8 +18,27 @@ def _now_naive() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+class Team(SQLModel, table=True):
+    """A tenant. Bots belong to a team; team members share visibility."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    name: str = Field(index=True, unique=True)
+    created_at: datetime = Field(default_factory=_now)
+
+
+class User(SQLModel, table=True):
+    """A panel user in exactly one team. The super-admin is NOT a row here
+    (it authenticates from .env); this table holds team members only."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    username: str = Field(index=True, unique=True)  # normalized lowercase
+    password_hash: str
+    team_id: int | None = Field(default=None, foreign_key="team.id", index=True)
+    created_at: datetime = Field(default_factory=_now)
+
+
 class Bot(SQLModel, table=True):
-    """A registered Telegram bot (owned by the single admin)."""
+    """A registered Telegram bot, owned by a team (team_id NULL = admin-only)."""
 
     id: int | None = Field(default=None, primary_key=True)
     telegram_bot_id: int = Field(index=True, unique=True)
@@ -28,6 +47,7 @@ class Bot(SQLModel, table=True):
     webhook_secret: str
     status: str = "active"  # active | disabled | invalid
     access_password_hash: str | None = None  # optional per-bot access lock
+    team_id: int | None = Field(default=None, foreign_key="team.id", index=True)
     created_at: datetime = Field(default_factory=_now)
 
 

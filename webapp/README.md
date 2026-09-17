@@ -50,11 +50,22 @@ ngrok http 8000        # copy URL https://xxxx.ngrok-free.app vào PUBLIC_URL, r
 4. Vào trang bot → thêm **tuyến** (nguồn → đích), tick *Hai chiều* cho bridge.
 5. Forward chạy ngay, không cần restart.
 
+## Tài khoản & Team (multi-tenant)
+Panel hỗ trợ nhiều người dùng, cô lập theo **team**:
+- **Super-admin** = tài khoản trong `.env` (`ADMIN_USERNAME`/`ADMIN_PASSWORD`). Thấy **mọi bot**, quản lý team/user. Vào **"Quản trị"** (góc trên) → `/admin`.
+- **Team**: bot thuộc về 1 team; **mọi thành viên team** cùng thấy/quản lý bot đó.
+- **User** (thành viên team): chỉ thấy bot của team mình. **Admin tạo tài khoản** ở `/admin` (không tự đăng ký):
+  1. Tạo **Team** (nhập tên).
+  2. Tạo **User** (username, mật khẩu ≥8 ký tự, chọn team).
+  3. Đưa username/mật khẩu cho thành viên → họ đăng nhập, tự thêm bot vào team.
+- Khi **user** thêm bot → bot thuộc team của họ. Khi **super-admin** thêm bot → chọn team sở hữu (để trống = chỉ admin thấy).
+- Xoá team bị chặn nếu còn user/bot. Cô lập được kiểm bằng ma trận IDOR (mọi route `/bots/{id}` chặn chéo team → 403).
+
 ## Test
 ```bash
 pytest
 ```
-Kiểm thử thật (mã hoá, logic forward, auth, webhook secret), không mock/không gọi mạng.
+Kiểm thử thật (mã hoá, logic forward, auth, cô lập team/IDOR, webhook secret), không mock/không gọi mạng.
 
 ## Người gửi được forward + nhãn
 **Khai báo chung, gán theo nhóm — có tìm kiếm + phân trang (chịu được 500–1000 người).**

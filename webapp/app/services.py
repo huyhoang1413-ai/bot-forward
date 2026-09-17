@@ -18,6 +18,8 @@ from app.models import (
     ForwardJob,
     Route,
     SenderGroupAssignment,
+    Team,
+    User,
 )
 from app.pw import hash_password
 
@@ -29,11 +31,15 @@ class DuplicateBotError(Exception):
 
 
 async def add_bot(
-    session: Session, token: str, access_password: str | None = None
+    session: Session,
+    token: str,
+    access_password: str | None = None,
+    team_id: int | None = None,
 ) -> Bot:
     """Validate a token, store it encrypted, and register its webhook.
 
     ``access_password`` (optional) locks the bot's page behind that password.
+    ``team_id`` (optional) sets the owning team (None = admin-only).
     Raises telegram_api.InvalidTokenError or DuplicateBotError.
     """
     token = token.strip()
@@ -53,6 +59,7 @@ async def add_bot(
         webhook_secret=secrets.token_urlsafe(32),
         status="active",
         access_password_hash=hash_password(access_password) if access_password else None,
+        team_id=team_id,
     )
     session.add(bot)
     session.commit()
@@ -423,5 +430,114 @@ def remove_group_sender(
     if row:
         session.delete(row)
         session.commit()
+
+
+# --- Multi-tenant: teams, users, bot visibility ---
+
+def visible_bots(session: Session, team_id: int | None, is_admin: bool) -> list[Bot]:
+    """Bots visible to a viewer. Super-admin sees all; a member sees only their
+    team's bots (a member with no team sees none)."""
+    if is_admin:
+        return session.exec(select(Bot)).all()
+    if team_id is None:
+        return []
+    return session.exec(select(Bot).where(Bot.team_id == team_id)).all()
+
+
+def can_access_bot(bot: Bot | None, team_id: int | None, is_admin: bool) -> bool:
+    """Whether a viewer may access a specific bot (super-admin bypass)."""
+    if bot is None:
+        return False
+    if is_admin:
+        return True
+    return team_id is not None and bot.team_id == team_id
+
+
+# --- Team CRUD ---
+
+def create_team(session: Session, name: str) -> Team | None:
+    """Create a team. Returns None on blank/duplicate name."""
+    name = (name or "").strip()
+    if not name:
+        return None
+    if session.exec(select(Team).where(Team.name == name)).first():
+        return None
+    team = Team(name=name)
+    session.add(team)
+    session.commit()
+    session.refresh(team)
+    return team
+
+
+def list_teams(session: Session) -> list[Team]:
+    return session.exec(select(Team).order_by(Team.name)).all()
+
+
+def delete_team(session: Session, team_id: int) -> bool:
+    """Delete a team only if it has no users and no bots. Returns False otherwise."""
+    team = session.get(Team, team_id)
+    if not team:
+        return False
+    has_user = session.exec(select(User).where(User.team_id == team_id)).first()
+    has_bot = session.exec(select(Bot).where(Bot.team_id == team_id)).first()
+    if has_user or has_bot:
+        return False
+    session.delete(team)
+    session.commit()
+    return True
+
+
+# --- User CRUD ---
+
+def get_user_by_username(session: Session, username: str) -> User | None:
+    username = (username or "").strip().lower()
+    if not username:
+        return None
+    return session.exec(select(User).where(User.username == username)).first()
+
+
+def create_user(
+    session: Session, username: str, password: str, team_id: int
+) -> User | None:
+    """Create a team member. Returns None on invalid/duplicate username or
+    missing team. Password is PBKDF2-hashed."""
+    username = (username or "").strip().lower()
+    if not username or not (password or "").strip():
+        return None
+    if session.get(Team, team_id) is None:
+        return None
+    if get_user_by_username(session, username):
+        return None
+    user = User(
+        username=username,
+        password_hash=hash_password(password),
+        team_id=team_id,
+    )
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    return user
+
+
+def list_users(session: Session) -> list[User]:
+    return session.exec(select(User).order_by(User.username)).all()
+
+
+def delete_user(session: Session, user_id: int) -> None:
+    user = session.get(User, user_id)
+    if user:
+        session.delete(user)
+        session.commit()
+
+
+def reset_user_password(session: Session, user_id: int, password: str) -> bool:
+    """Set a new password for a user. Returns False if user missing/blank pw."""
+    user = session.get(User, user_id)
+    if not user or not (password or "").strip():
+        return False
+    user.password_hash = hash_password(password)
+    session.add(user)
+    session.commit()
+    return True
 
 
