@@ -29,3 +29,6 @@ claudekit.zip
 # OS / editor
 .DS_Store
 Thumbs.db
+
+# Nested local clone (not part of the repo)
+bot-forward/
