@@ -56,7 +56,7 @@ Panel hỗ trợ nhiều người dùng, cô lập theo **team**:
 - **Team**: bot thuộc về 1 team; **mọi thành viên team** cùng thấy/quản lý bot đó.
 - **User** (thành viên team): chỉ thấy bot của team mình. **Admin tạo tài khoản** ở `/admin` (không tự đăng ký):
   1. Tạo **Team** (nhập tên).
-  2. Tạo **User** (username, mật khẩu ≥8 ký tự, chọn team).
+  2. Tạo **User** (username, mật khẩu ≥3 ký tự, chọn team).
   3. Đưa username/mật khẩu cho thành viên → họ đăng nhập, tự thêm bot vào team.
 - Khi **user** thêm bot → bot thuộc team của họ. Khi **super-admin** thêm bot → chọn team sở hữu (để trống = chỉ admin thấy).
 - Xoá team bị chặn nếu còn user/bot. Cô lập được kiểm bằng ma trận IDOR (mọi route `/bots/{id}` chặn chéo team → 403).

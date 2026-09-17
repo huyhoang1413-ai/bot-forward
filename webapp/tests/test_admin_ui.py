@@ -61,7 +61,7 @@ def test_create_user_short_password_rejected(client):
         team = s.exec(select(Team).where(Team.name == "ShortPw")).first()
     r = client.post(
         "/admin/users",
-        data={"username": "shorty", "password": "abc", "team_id": team.id},
+        data={"username": "shorty", "password": "ab", "team_id": team.id},
         follow_redirects=False,
     )
     assert "pw_short" in r.headers["location"]

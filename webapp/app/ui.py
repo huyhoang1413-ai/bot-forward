@@ -460,7 +460,7 @@ async def admin_create_user(
     team_id: int = Form(...),
     session: Session = Depends(get_session),
 ):
-    if len(password) < 8:
+    if len(password) < 3:
         return RedirectResponse("/admin?error=pw_short", status_code=status.HTTP_303_SEE_OTHER)
     ok = services.create_user(session, username, password, team_id)
     return RedirectResponse(
@@ -478,7 +478,7 @@ async def admin_delete_user(user_id: int, session: Session = Depends(get_session
 async def admin_reset_password(
     user_id: int, password: str = Form(...), session: Session = Depends(get_session)
 ):
-    if len(password) < 8:
+    if len(password) < 3:
         return RedirectResponse("/admin?error=pw_short", status_code=status.HTTP_303_SEE_OTHER)
     services.reset_user_password(session, user_id, password)
     return RedirectResponse("/admin", status_code=status.HTTP_303_SEE_OTHER)
