@@ -54,6 +54,27 @@ def test_add_route_bidirectional_creates_both_directions():
     assert pairs == {(10, 20), (20, 10)}
 
 
+def test_add_route_topic_bidirectional_swaps_chat_and_thread():
+    bot_id = _make_bot(2011)
+    with Session(engine) as s:
+        add_route(s, bot_id, 10, 20, bidirectional=True,
+                  source_thread_id=7, dest_thread_id=3)
+        quads = {
+            (r.source_chat_id, r.source_thread_id, r.dest_chat_id, r.dest_thread_id)
+            for r in _routes(s, bot_id)
+        }
+    # reverse route swaps BOTH chat and topic
+    assert quads == {(10, 7, 20, 3), (20, 3, 10, 7)}
+
+
+def test_add_route_topic_distinct_from_whole_group():
+    bot_id = _make_bot(2012)
+    with Session(engine) as s:
+        add_route(s, bot_id, 10, 20)                       # whole group
+        add_route(s, bot_id, 10, 20, source_thread_id=7, dest_thread_id=3)  # topic
+        assert len(_routes(s, bot_id)) == 2                # not deduped together
+
+
 def test_add_route_is_deduped():
     bot_id = _make_bot(2002)
     with Session(engine) as s:

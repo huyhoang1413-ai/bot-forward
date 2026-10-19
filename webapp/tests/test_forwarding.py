@@ -24,8 +24,9 @@ def _lmsg(chat, uid, username, message_id=7, **extra):
     return {"message": m}
 
 
-def _route(source, dest, enabled=True):
-    return Route(bot_id=1, source_chat_id=source, dest_chat_id=dest, enabled=enabled)
+def _route(source, dest, enabled=True, source_thread=None, dest_thread=None):
+    return Route(bot_id=1, source_chat_id=source, dest_chat_id=dest, enabled=enabled,
+                 source_thread_id=source_thread, dest_thread_id=dest_thread)
 
 
 def _msg(chat_id, from_id, message_id=7, text="hi", username=None):
@@ -43,7 +44,56 @@ def test_select_destinations_filters_by_source_and_enabled():
         _route(99, 40),            # different source
         _route(10, 50, enabled=False),  # disabled
     ]
-    assert select_destinations(routes, 10) == [20, 30]
+    assert select_destinations(routes, 10) == [(20, None), (30, None)]
+
+
+# --- forum topic routing ---
+
+def test_topic_id_requires_is_topic_message():
+    from app.forwarding import topic_id
+    assert topic_id({"message_thread_id": 7, "is_topic_message": True}) == 7
+    assert topic_id({"message_thread_id": 7}) is None          # reply-thread, not a topic
+    assert topic_id({}) is None
+
+
+def test_select_destinations_topic_matching():
+    routes = [
+        _route(10, 20, source_thread=7, dest_thread=3),   # topic 7 -> dest topic 3
+        _route(10, 21),                                   # whole group (any topic)
+        _route(10, 22, source_thread=9),                  # topic 9 only
+    ]
+    # a message in topic 7 -> topic route (20,3) + whole-group route (21,None)
+    assert select_destinations(routes, 10, 7) == [(20, 3), (21, None)]
+    # topic 9 -> topic-9 route + whole-group
+    assert select_destinations(routes, 10, 9) == [(21, None), (22, None)]
+    # General / no topic -> only the whole-group route
+    assert select_destinations(routes, 10, None) == [(21, None)]
+
+
+def test_forum_service_message_is_skipped():
+    upd = {"message": {"chat": {"id": 10}, "from": {"id": 5},
+                       "message_id": 7, "forum_topic_created": {"name": "X"}}}
+    assert build_jobs(upd, 999, [_route(10, 20)], 1) == []
+
+
+def test_build_jobs_stamps_dest_thread_id():
+    upd = _lmsg(10, 5, "alice", text="hi", is_topic_message=True, message_thread_id=7)
+    jobs = build_jobs(upd, 999, [_route(10, 20, source_thread=7, dest_thread=3)], 1)
+    assert len(jobs) == 1 and jobs[0].dest_chat_id == 20 and jobs[0].dest_thread_id == 3
+
+
+def test_build_jobs_labeled_stamps_dest_thread_id():
+    upd = _lmsg(10, 5, "alice", text="hi", is_topic_message=True, message_thread_id=7)
+    jobs = build_jobs(upd, 999, [_route(10, 20, source_thread=7, dest_thread=3)], 1,
+                      label_map={"alice": "Doby"})
+    assert jobs[0].kind == "text" and jobs[0].text == "[Doby] hi" and jobs[0].dest_thread_id == 3
+
+
+def test_chatid_in_topic_replies_into_topic():
+    upd = _lmsg(10, 5, "alice", text="/chatid", is_topic_message=True, message_thread_id=7)
+    jobs = build_jobs(upd, 999, [], 1)
+    assert len(jobs) == 1 and jobs[0].dest_thread_id == 7
+    assert "chat_id: 10" in jobs[0].text and "message_thread_id (topic): 7" in jobs[0].text
 
 
 def test_decide_forward_extracts_source_and_message_id():

@@ -22,6 +22,11 @@
       <div><label>Nhóm nguồn (chat_id)</label><input type="number" name="source_chat_id" required></div>
       <div><label>Nhóm đích (chat_id)</label><input type="number" name="dest_chat_id" required></div>
     </div>
+    <div class="row" style="margin-top:8px">
+      <div><label>Topic nguồn (tuỳ chọn)</label><input type="number" name="source_thread_id"></div>
+      <div><label>Topic đích (tuỳ chọn)</label><input type="number" name="dest_thread_id"></div>
+    </div>
+    <p class="muted" style="font-size:12px; margin:6px 0 0">Gõ <code>/chatid</code> trong một topic để lấy <code>message_thread_id</code>. Để trống = cả nhóm / General.</p>
     <label style="margin-top:12px"><input type="checkbox" name="bidirectional" value="true"> Hai chiều (bridge)</label>
     <div style="margin-top:12px"><button type="submit">Thêm tuyến</button></div>
   </form>
@@ -55,7 +60,7 @@
     <div style="margin-top:10px">
       {% for r in routes if r.source_chat_id == g %}
       <form method="post" action="/bots/{{ bot.id }}/routes/{{ r.id }}/delete" style="margin-top:4px; display:inline-block">
-        <button class="ghost" type="submit" style="font-size:12px">Xoá tuyến {{ g }} → {{ r.dest_chat_id }}</button>
+        <button class="ghost" type="submit" style="font-size:12px">Xoá tuyến {{ g }}{% if r.source_thread_id is not none %} ▸topic {{ r.source_thread_id }}{% endif %} → {{ r.dest_chat_id }}{% if r.dest_thread_id is not none %} ▸topic {{ r.dest_thread_id }}{% endif %}</button>
       </form>
       {% endfor %}
 

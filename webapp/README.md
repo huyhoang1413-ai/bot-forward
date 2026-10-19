@@ -50,6 +50,15 @@ ngrok http 8000        # copy URL https://xxxx.ngrok-free.app vào PUBLIC_URL, r
 4. Vào trang bot → thêm **tuyến** (nguồn → đích), tick *Hai chiều* cho bridge.
 5. Forward chạy ngay, không cần restart.
 
+## Forward theo topic (forum)
+Hỗ trợ group dạng **forum (có Topics)** — route chính xác theo cặp topic:
+- Gõ `/chatid` **trong một topic** → bot trả về `chat_id` + `message_thread_id` (id topic) ngay trong topic đó.
+- Khi thêm tuyến, điền thêm **"Topic nguồn"** / **"Topic đích"** (= `message_thread_id`). Để trống = **cả nhóm / General**.
+- Tin từ topic nguồn → đổ vào **đúng topic đích**. Tick **Hai chiều** → bridge theo topic (đảo cả nhóm lẫn topic).
+- Tuyến **không điền topic** = cả nhóm (mọi topic) → tương thích như trước.
+- Service message của forum (tạo/sửa/đóng topic…) không bị forward.
+- *Hạn chế:* chưa tách riêng "chỉ General" khỏi "cả nhóm"; UI hiện id topic dạng số (chưa hiện tên).
+
 ## Tài khoản & Team (multi-tenant)
 Panel hỗ trợ nhiều người dùng, cô lập theo **team**:
 - **Super-admin** = tài khoản trong `.env` (`ADMIN_USERNAME`/`ADMIN_PASSWORD`). Thấy **mọi bot**, quản lý team/user. Vào **"Quản trị"** (góc trên) → `/admin`.

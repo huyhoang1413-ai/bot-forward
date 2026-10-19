@@ -55,6 +55,7 @@ def _job_to_dict(job: ForwardJob) -> dict:
         "id": job.id,
         "bot_id": job.bot_id,
         "dest_chat_id": job.dest_chat_id,
+        "dest_thread_id": job.dest_thread_id,
         "kind": job.kind,
         "from_chat_id": job.from_chat_id,
         "message_id": job.message_id,

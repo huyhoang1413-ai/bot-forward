@@ -328,9 +328,19 @@ async def create_route(
     source_chat_id: int = Form(...),
     dest_chat_id: int = Form(...),
     bidirectional: bool = Form(False),
+    source_thread_id: str = Form(""),
+    dest_thread_id: str = Form(""),
     session: Session = Depends(get_session),
 ):
-    services.add_route(session, bot_id, source_chat_id, dest_chat_id, bidirectional)
+    def _opt_int(v: str) -> int | None:
+        v = (v or "").strip()
+        return int(v) if v else None
+
+    services.add_route(
+        session, bot_id, source_chat_id, dest_chat_id, bidirectional,
+        source_thread_id=_opt_int(source_thread_id),
+        dest_thread_id=_opt_int(dest_thread_id),
+    )
     return RedirectResponse(f"/bots/{bot_id}", status_code=status.HTTP_303_SEE_OTHER)
 
 

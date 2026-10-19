@@ -87,12 +87,14 @@ async def send_job(job: dict) -> None:
         raise RuntimeError(f"bot {job['bot_id']} not found / not decryptable")
 
     kind = job["kind"]
+    mt = job.get("dest_thread_id")  # forum topic (None = General/normal)
     try:
         if kind == "text":
             await bot.send_message(
                 chat_id=job["dest_chat_id"],
                 text=job["text"],
                 entities=_entities(job.get("entities_json"), bot),
+                message_thread_id=mt,
             )
         elif kind == "copy_caption":
             await bot.copy_message(
@@ -101,12 +103,14 @@ async def send_job(job: dict) -> None:
                 message_id=job["message_id"],
                 caption=job.get("caption"),
                 caption_entities=_entities(job.get("caption_entities_json"), bot),
+                message_thread_id=mt,
             )
         else:  # "copy"
             await bot.copy_message(
                 chat_id=job["dest_chat_id"],
                 from_chat_id=job["from_chat_id"],
                 message_id=job["message_id"],
+                message_thread_id=mt,
             )
     except (BadRequest, Forbidden) as exc:
         raise PermanentSendError(str(exc)) from exc

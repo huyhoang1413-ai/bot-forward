@@ -61,6 +61,25 @@ def shift_entities(entities, delta: int) -> list[dict]:
     return out
 
 
+# Forum topic service messages — never forwarded (not user content).
+_FORUM_SERVICE_KEYS = (
+    "forum_topic_created", "forum_topic_edited", "forum_topic_closed",
+    "forum_topic_reopened", "general_forum_topic_hidden",
+    "general_forum_topic_unhidden",
+)
+
+
+def topic_id(msg: dict) -> int | None:
+    """Forum topic id of a message, or None for General / non-forum.
+
+    Trust ``message_thread_id`` only when ``is_topic_message`` is true (avoids
+    false positives from non-forum reply threads).
+    """
+    if msg.get("is_topic_message"):
+        return msg.get("message_thread_id")
+    return None
+
+
 def classify_message(msg: dict) -> str:
     """text | caption_media | other (sticker/poll/location/... — no caption)."""
     if msg.get("text") is not None:
@@ -70,32 +89,34 @@ def classify_message(msg: dict) -> str:
     return "other"
 
 
-def _copy_job(bot_id: int, dest: int, source: int, message_id) -> ForwardJob:
+def _copy_job(bot_id: int, dest: int, source: int, message_id, dest_thread_id=None) -> ForwardJob:
     return ForwardJob(
-        bot_id=bot_id, dest_chat_id=dest, kind="copy",
+        bot_id=bot_id, dest_chat_id=dest, dest_thread_id=dest_thread_id, kind="copy",
         from_chat_id=source, message_id=message_id,
     )
 
 
-def _text_job(bot_id: int, dest: int, text: str, entities: list[dict]) -> ForwardJob:
+def _text_job(bot_id: int, dest: int, text: str, entities: list[dict], dest_thread_id=None) -> ForwardJob:
     return ForwardJob(
-        bot_id=bot_id, dest_chat_id=dest, kind="text", text=text,
-        entities_json=json.dumps(entities) if entities else None,
+        bot_id=bot_id, dest_chat_id=dest, dest_thread_id=dest_thread_id, kind="text",
+        text=text, entities_json=json.dumps(entities) if entities else None,
     )
 
 
 def _copy_caption_job(
-    bot_id: int, dest: int, source: int, message_id, caption: str, entities: list[dict]
+    bot_id: int, dest: int, source: int, message_id, caption: str, entities: list[dict],
+    dest_thread_id=None,
 ) -> ForwardJob:
     return ForwardJob(
-        bot_id=bot_id, dest_chat_id=dest, kind="copy_caption",
+        bot_id=bot_id, dest_chat_id=dest, dest_thread_id=dest_thread_id, kind="copy_caption",
         from_chat_id=source, message_id=message_id, caption=caption,
         caption_entities_json=json.dumps(entities) if entities else None,
     )
 
 
 def build_labeled_jobs(
-    msg: dict, dest: int, bot_id: int, source: int, message_id, label: str
+    msg: dict, dest: int, bot_id: int, source: int, message_id, label: str,
+    dest_thread_id=None,
 ) -> list[ForwardJob]:
     """Jobs that deliver one message to ``dest`` with a '[label]' prefix.
 
@@ -106,29 +127,30 @@ def build_labeled_jobs(
     prefix = f"[{label}] "
     k = prefix_len16(prefix)
     shape = classify_message(msg)
+    dt = dest_thread_id
 
     if shape == "text":
         new_text = prefix + (msg.get("text") or "")
         if prefix_len16(new_text) > TEXT_LIMIT:  # Telegram limits are UTF-16 units
-            return [_copy_job(bot_id, dest, source, message_id)]
-        return [_text_job(bot_id, dest, new_text, shift_entities(msg.get("entities"), k))]
+            return [_copy_job(bot_id, dest, source, message_id, dt)]
+        return [_text_job(bot_id, dest, new_text, shift_entities(msg.get("entities"), k), dt)]
 
     if shape == "caption_media":
         cap0 = msg.get("caption")
         if cap0:
             new_cap = prefix + cap0
             if prefix_len16(new_cap) > CAPTION_LIMIT:  # UTF-16 units
-                return [_copy_job(bot_id, dest, source, message_id)]
+                return [_copy_job(bot_id, dest, source, message_id, dt)]
             ents = shift_entities(msg.get("caption_entities"), k)
         else:
             new_cap = f"[{label}]"
             ents = []
-        return [_copy_caption_job(bot_id, dest, source, message_id, new_cap, ents)]
+        return [_copy_caption_job(bot_id, dest, source, message_id, new_cap, ents, dt)]
 
     # other (no text/caption) -> a "[label]" line, then the item copied as-is
     return [
-        _text_job(bot_id, dest, f"[{label}]", []),
-        _copy_job(bot_id, dest, source, message_id),
+        _text_job(bot_id, dest, f"[{label}]", [], dt),
+        _copy_job(bot_id, dest, source, message_id, dt),
     ]
 
 
@@ -138,6 +160,7 @@ class Action:
     source_chat_id: int | None = None
     message_id: int | None = None
     sender_username: str | None = None  # normalized sender username (forward only)
+    source_thread_id: int | None = None  # forum topic of the source message (None = General)
 
 
 def decide_action(update: dict, telegram_bot_id: int) -> Action:
@@ -160,11 +183,15 @@ def decide_action(update: dict, telegram_bot_id: int) -> Action:
     if from_user.get("id") == telegram_bot_id:
         return Action("skip")  # loop guard
 
+    if any(k in msg for k in _FORUM_SERVICE_KEYS):
+        return Action("skip")  # forum topic service message -> not content
+
+    thread = topic_id(msg)
     text = msg.get("text") or ""
     if text.startswith("/chatid"):
-        return Action("chatid", source_chat_id=source)
+        return Action("chatid", source_chat_id=source, source_thread_id=thread)
     if text.startswith("/start"):
-        return Action("start", source_chat_id=source)
+        return Action("start", source_chat_id=source, source_thread_id=thread)
 
     raw_username = from_user.get("username")
     sender_username = normalize_username(raw_username) if raw_username else None
@@ -173,6 +200,7 @@ def decide_action(update: dict, telegram_bot_id: int) -> Action:
         source_chat_id=source,
         message_id=msg.get("message_id"),
         sender_username=sender_username,
+        source_thread_id=thread,
     )
 
 
@@ -187,12 +215,20 @@ def is_sender_allowed(sender_username: str | None, allowed: set[str]) -> bool:
     return sender_username is not None and sender_username in allowed
 
 
-def select_destinations(routes: Sequence[Route], source_chat_id: int) -> list[int]:
-    """Enabled destination chat ids for a given source (pure)."""
+def select_destinations(
+    routes: Sequence[Route], source_chat_id: int, source_thread_id: int | None = None
+) -> list[tuple[int, int | None]]:
+    """Enabled (dest_chat_id, dest_thread_id) pairs for a source message (pure).
+
+    A route matches when its source chat matches AND its ``source_thread_id`` is
+    None (whole group — any topic) OR equals the message's topic.
+    """
     return [
-        r.dest_chat_id
+        (r.dest_chat_id, r.dest_thread_id)
         for r in routes
-        if r.enabled and r.source_chat_id == source_chat_id
+        if r.enabled
+        and r.source_chat_id == source_chat_id
+        and (r.source_thread_id is None or r.source_thread_id == source_thread_id)
     ]
 
 
@@ -232,12 +268,16 @@ def build_jobs(
     if action.kind == "skip":
         return []
     if action.kind == "chatid":
+        text = f"chat_id: {action.source_chat_id}"
+        if action.source_thread_id is not None:
+            text += f"\nmessage_thread_id (topic): {action.source_thread_id}"
         return [
             ForwardJob(
                 bot_id=bot_id,
                 dest_chat_id=action.source_chat_id,
+                dest_thread_id=action.source_thread_id,  # reply inside the same topic
                 kind="text",
-                text=f"chat_id: {action.source_chat_id}",
+                text=text,
             )
         ]
     if action.kind == "start":
@@ -245,6 +285,7 @@ def build_jobs(
             ForwardJob(
                 bot_id=bot_id,
                 dest_chat_id=action.source_chat_id,
+                dest_thread_id=action.source_thread_id,
                 kind="text",
                 text=_START_TEXT,
             )
@@ -264,13 +305,18 @@ def build_jobs(
     msg = update.get("message") or update.get("edited_message") or {}
 
     jobs: list[ForwardJob] = []
-    for dest in select_destinations(routes, action.source_chat_id):
+    for dest, dest_thread in select_destinations(
+        routes, action.source_chat_id, action.source_thread_id
+    ):
         if label:
             jobs.extend(
                 build_labeled_jobs(
-                    msg, dest, bot_id, action.source_chat_id, action.message_id, label
+                    msg, dest, bot_id, action.source_chat_id, action.message_id,
+                    label, dest_thread,
                 )
             )
         else:
-            jobs.append(_copy_job(bot_id, dest, action.source_chat_id, action.message_id))
+            jobs.append(
+                _copy_job(bot_id, dest, action.source_chat_id, action.message_id, dest_thread)
+            )
     return jobs

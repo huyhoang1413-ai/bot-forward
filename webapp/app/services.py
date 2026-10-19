@@ -130,24 +130,35 @@ def add_route(
     source_chat_id: int,
     dest_chat_id: int,
     bidirectional: bool = False,
+    source_thread_id: int | None = None,
+    dest_thread_id: int | None = None,
 ) -> list[Route]:
-    """Create one directed route (or two, if bidirectional)."""
-    created: list[Route] = []
-    pairs = [(source_chat_id, dest_chat_id)]
-    if bidirectional:
-        pairs.append((dest_chat_id, source_chat_id))
+    """Create one directed route (or two, if bidirectional).
 
-    for src, dst in pairs:
+    Optional forum topic scoping; the reverse route swaps BOTH chat and topic.
+    """
+    created: list[Route] = []
+    # (source_chat, source_thread, dest_chat, dest_thread)
+    pairs = [(source_chat_id, source_thread_id, dest_chat_id, dest_thread_id)]
+    if bidirectional:
+        pairs.append((dest_chat_id, dest_thread_id, source_chat_id, source_thread_id))
+
+    for src, sthr, dst, dthr in pairs:
         exists = session.exec(
             select(Route).where(
                 Route.bot_id == bot_id,
                 Route.source_chat_id == src,
+                Route.source_thread_id == sthr,
                 Route.dest_chat_id == dst,
+                Route.dest_thread_id == dthr,
             )
         ).first()
         if exists:
             continue
-        route = Route(bot_id=bot_id, source_chat_id=src, dest_chat_id=dst)
+        route = Route(
+            bot_id=bot_id, source_chat_id=src, source_thread_id=sthr,
+            dest_chat_id=dst, dest_thread_id=dthr,
+        )
         session.add(route)
         created.append(route)
     session.commit()

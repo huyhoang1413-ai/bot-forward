@@ -52,12 +52,19 @@ class Bot(SQLModel, table=True):
 
 
 class Route(SQLModel, table=True):
-    """A directed forwarding rule: copy messages from source -> dest."""
+    """A directed forwarding rule: copy messages from source -> dest.
+
+    Optional forum topic scoping: ``source_thread_id``/``dest_thread_id`` are a
+    message_thread_id (None = whole group / General). A source route with
+    source_thread_id=None matches every topic of the group.
+    """
 
     id: int | None = Field(default=None, primary_key=True)
     bot_id: int = Field(foreign_key="bot.id", index=True)
     source_chat_id: int = Field(index=True)
+    source_thread_id: int | None = Field(default=None, index=True)
     dest_chat_id: int
+    dest_thread_id: int | None = Field(default=None)
     enabled: bool = True
     created_at: datetime = Field(default_factory=_now)
 
@@ -120,6 +127,7 @@ class ForwardJob(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     bot_id: int = Field(index=True)
     dest_chat_id: int = Field(index=True)
+    dest_thread_id: int | None = None  # target forum topic (None = General/normal)
     # "copy" (copy_message) | "text" (send_message) | "copy_caption" (copy with
     # an overridden caption, used for labeled media).
     kind: str
