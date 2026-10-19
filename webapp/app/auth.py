@@ -104,10 +104,11 @@ def require_bot_access(
     1. logged in, 2. team ownership (super-admin bypass) — cross-team => 403,
     3. per-bot access password unlock (redirect to the unlock page)."""
     require_auth(request)
+    if is_admin(request):
+        return  # super-admin bypasses both team ownership and the per-bot password
     bot = session.get(Bot, bot_id)
-    if bot is not None and not is_admin(request):
-        if bot.team_id != team_id(request):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN)  # IDOR
+    if bot is not None and bot.team_id != team_id(request):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN)  # IDOR
     if bot and bot.access_password_hash and not is_bot_unlocked(request, bot_id):
         raise HTTPException(
             status_code=status.HTTP_303_SEE_OTHER,
