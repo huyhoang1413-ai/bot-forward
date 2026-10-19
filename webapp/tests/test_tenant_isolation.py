@@ -59,6 +59,7 @@ def test_member_cannot_mutate_other_teams_bot(client):
     assert client.get(f"/bots/{other}/senders", follow_redirects=False).status_code == 403
     assert client.get(f"/bots/{other}/groups/10/senders", follow_redirects=False).status_code == 403
     assert client.post(f"/bots/{other}/routes", data={}, follow_redirects=False).status_code == 403
+    assert client.post(f"/bots/{other}/routes/1/edit", data={}, follow_redirects=False).status_code == 403
     assert client.post(f"/bots/{other}/delete", follow_redirects=False).status_code == 403
     assert client.post(f"/bots/{other}/password", data={}, follow_redirects=False).status_code == 403
     assert client.post(

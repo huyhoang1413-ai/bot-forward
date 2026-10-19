@@ -165,6 +165,28 @@ def add_route(
     return created
 
 
+def update_route(
+    session: Session,
+    route_id: int,
+    bot_id: int,
+    source_chat_id: int,
+    dest_chat_id: int,
+    source_thread_id: int | None = None,
+    dest_thread_id: int | None = None,
+) -> bool:
+    """Edit an existing route in place (bot-scoped). Returns False on IDOR miss."""
+    route = session.get(Route, route_id)
+    if not route or route.bot_id != bot_id:
+        return False
+    route.source_chat_id = source_chat_id
+    route.dest_chat_id = dest_chat_id
+    route.source_thread_id = source_thread_id
+    route.dest_thread_id = dest_thread_id
+    session.add(route)
+    session.commit()
+    return True
+
+
 def delete_route(session: Session, route_id: int, bot_id: int | None = None) -> None:
     route = session.get(Route, route_id)
     # Scope the delete to the bot in the URL to avoid cross-bot deletion (IDOR).

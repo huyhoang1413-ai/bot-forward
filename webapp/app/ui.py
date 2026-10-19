@@ -26,6 +26,12 @@ templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 INLINE_PREVIEW = 20
 
 
+def _opt_int(v: str) -> int | None:
+    """Parse an optional integer form field: blank -> None."""
+    v = (v or "").strip()
+    return int(v) if v else None
+
+
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request, error: int = 0):
     return templates.TemplateResponse(
@@ -332,12 +338,29 @@ async def create_route(
     dest_thread_id: str = Form(""),
     session: Session = Depends(get_session),
 ):
-    def _opt_int(v: str) -> int | None:
-        v = (v or "").strip()
-        return int(v) if v else None
-
     services.add_route(
         session, bot_id, source_chat_id, dest_chat_id, bidirectional,
+        source_thread_id=_opt_int(source_thread_id),
+        dest_thread_id=_opt_int(dest_thread_id),
+    )
+    return RedirectResponse(f"/bots/{bot_id}", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post(
+    "/bots/{bot_id}/routes/{route_id}/edit",
+    dependencies=[Depends(require_auth), Depends(require_bot_access)],
+)
+async def edit_route(
+    bot_id: int,
+    route_id: int,
+    source_chat_id: int = Form(...),
+    dest_chat_id: int = Form(...),
+    source_thread_id: str = Form(""),
+    dest_thread_id: str = Form(""),
+    session: Session = Depends(get_session),
+):
+    services.update_route(
+        session, route_id, bot_id, source_chat_id, dest_chat_id,
         source_thread_id=_opt_int(source_thread_id),
         dest_thread_id=_opt_int(dest_thread_id),
     )

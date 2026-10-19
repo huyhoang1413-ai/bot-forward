@@ -24,6 +24,7 @@ from app.services import (
     remove_group_sender,
     search_unassigned,
     update_allowed_label,
+    update_route,
     visible_bots,
 )
 
@@ -73,6 +74,30 @@ def test_add_route_topic_distinct_from_whole_group():
         add_route(s, bot_id, 10, 20)                       # whole group
         add_route(s, bot_id, 10, 20, source_thread_id=7, dest_thread_id=3)  # topic
         assert len(_routes(s, bot_id)) == 2                # not deduped together
+
+
+def test_update_route_edits_in_place():
+    bot_id = _make_bot(2013)
+    with Session(engine) as s:
+        add_route(s, bot_id, 10, 20)
+        r = _routes(s, bot_id)[0]
+        ok = update_route(s, r.id, bot_id, 11, 21,
+                          source_thread_id=5, dest_thread_id=2)
+        assert ok is True
+        row = _routes(s, bot_id)[0]
+        assert (row.source_chat_id, row.source_thread_id,
+                row.dest_chat_id, row.dest_thread_id) == (11, 5, 21, 2)
+
+
+def test_update_route_scoped_to_bot():
+    bot_a = _make_bot(2014)
+    bot_b = _make_bot(2015)
+    with Session(engine) as s:
+        add_route(s, bot_a, 10, 20)
+        r = _routes(s, bot_a)[0]
+        # wrong bot -> no-op
+        assert update_route(s, r.id, bot_b, 99, 99) is False
+        assert _routes(s, bot_a)[0].source_chat_id == 10
 
 
 def test_add_route_is_deduped():

@@ -59,9 +59,20 @@
     </summary>
     <div style="margin-top:10px">
       {% for r in routes if r.source_chat_id == g %}
-      <form method="post" action="/bots/{{ bot.id }}/routes/{{ r.id }}/delete" style="margin-top:4px; display:inline-block">
-        <button class="ghost" type="submit" style="font-size:12px">Xoá tuyến {{ g }}{% if r.source_thread_id is not none %} ▸topic {{ r.source_thread_id }}{% endif %} → {{ r.dest_chat_id }}{% if r.dest_thread_id is not none %} ▸topic {{ r.dest_thread_id }}{% endif %}</button>
-      </form>
+      <div style="margin-top:6px; padding-bottom:8px; border-bottom:1px solid #334155">
+        <form method="post" action="/bots/{{ bot.id }}/routes/{{ r.id }}/edit" class="row" style="align-items:center; gap:6px">
+          <div style="min-width:110px"><input type="number" name="source_chat_id" value="{{ r.source_chat_id }}" required title="Nhóm nguồn"></div>
+          <div style="min-width:80px; flex:0 0 auto"><input type="number" name="source_thread_id" value="{{ r.source_thread_id if r.source_thread_id is not none else '' }}" placeholder="topic nguồn"></div>
+          <span class="muted" style="flex:0 0 auto">→</span>
+          <div style="min-width:110px"><input type="number" name="dest_chat_id" value="{{ r.dest_chat_id }}" required title="Nhóm đích"></div>
+          <div style="min-width:80px; flex:0 0 auto"><input type="number" name="dest_thread_id" value="{{ r.dest_thread_id if r.dest_thread_id is not none else '' }}" placeholder="topic đích"></div>
+          <div style="flex:0 0 auto"><button type="submit" style="font-size:12px">Lưu</button></div>
+        </form>
+        <form method="post" action="/bots/{{ bot.id }}/routes/{{ r.id }}/delete" style="margin-top:4px"
+              onsubmit="return confirm('Xoá tuyến này?')">
+          <button class="ghost" type="submit" style="font-size:12px">Xoá tuyến</button>
+        </form>
+      </div>
       {% endfor %}
 
       <div style="margin-top:14px; border-top:1px solid #334155; padding-top:10px">
