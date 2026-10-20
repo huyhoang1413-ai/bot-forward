@@ -50,6 +50,13 @@ ngrok http 8000        # copy URL https://xxxx.ngrok-free.app vào PUBLIC_URL, r
 4. Vào trang bot → thêm **tuyến** (nguồn → đích), tick *Hai chiều* cho bridge.
 5. Forward chạy ngay, không cần restart.
 
+## Nickname tự động (lấy tên Telegram)
+Bật ở trang bot → mục **"Nickname tự động"** → bot tự lấy **first_name** của người gửi làm nick, gắn vào tin forward dạng **`[Tên] nội dung`** — không cần gõ tay.
+- Tên được **ghi nhận 1 lần** khi người đó gửi tin (Bot API không tra được tên qua username, phải thấy tin). Áp dụng **mọi người**, kể cả khi không giới hạn allowlist.
+- Trang **"Tên đã ghi nhận"**: xem/tìm, đặt **ghi đè** nick, hoặc xoá. Tên bị "đóng băng" lúc ghi nhận (sửa tay được).
+- **Ưu tiên nhãn**: nhãn thủ công (theo username) > ghi đè > first_name tự động.
+- Người **ẩn danh / channel / không có `from`** → không ghi nhận, forward không gắn tên.
+
 ## Forward theo topic (forum)
 Hỗ trợ group dạng **forum (có Topics)** — route chính xác theo cặp topic:
 - Gõ `/chatid` **trong một topic** → bot trả về `chat_id` + `message_thread_id` (id topic) ngay trong topic đó.

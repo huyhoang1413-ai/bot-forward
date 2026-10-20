@@ -46,6 +46,15 @@ def is_valid_label(label: str) -> bool:
     return label.isprintable()
 
 
+def sanitize_label(name: str | None) -> str | None:
+    """Make an untrusted name safe for a '[name]' prefix: drop brackets/newlines,
+    clamp to 32 chars. Returns None if nothing usable remains."""
+    if not name:
+        return None
+    s = "".join(c for c in name if c not in "[]\r\n").strip()
+    return s[:32] or None
+
+
 def prefix_len16(prefix: str) -> int:
     """Length of a string in UTF-16 code units (Telegram entity offset unit)."""
     return len(prefix.encode("utf-16-le")) // 2
@@ -161,6 +170,8 @@ class Action:
     message_id: int | None = None
     sender_username: str | None = None  # normalized sender username (forward only)
     source_thread_id: int | None = None  # forum topic of the source message (None = General)
+    sender_user_id: int | None = None  # from.id (for auto-nick capture)
+    sender_first_name: str | None = None  # from.first_name (auto-nick source)
 
 
 def decide_action(update: dict, telegram_bot_id: int) -> Action:
@@ -201,6 +212,8 @@ def decide_action(update: dict, telegram_bot_id: int) -> Action:
         message_id=msg.get("message_id"),
         sender_username=sender_username,
         source_thread_id=thread,
+        sender_user_id=from_user.get("id"),
+        sender_first_name=from_user.get("first_name"),
     )
 
 
@@ -244,7 +257,7 @@ def build_jobs(
     routes: Sequence[Route],
     bot_id: int,
     allowed_by_source: dict[int, dict[str, str | None]] | None = None,
-    label_map: dict[str, str | None] | None = None,
+    label: str | None = None,
     gate_active: bool = False,
 ) -> list[ForwardJob]:
     """Turn one update into durable outbox jobs (pure — inserts happen later).
@@ -259,9 +272,9 @@ def build_jobs(
       map is 'open' (forward everyone). An empty set is never stored for a
       source (absence encodes 'open'), so a restricted group always has ≥1 user.
 
-    Labeling is decoupled from gating: ``label_map`` is the bot's global
-    {username: label}; any forwarded message whose sender has a label gets the
-    '[label]' prefix, even from an open group. Commands are never gated.
+    Labeling is decoupled from gating: ``label`` is the already-resolved nickname
+    for THIS message's sender (or None); it prefixes every forwarded copy as
+    '[label]' (sanitized here), even from an open group. Commands are never gated.
     """
     action = decide_action(update, telegram_bot_id)
 
@@ -300,8 +313,8 @@ def build_jobs(
         ):
             return []
 
-    # label is decoupled from gating: applied to any known labeled sender
-    label = (label_map or {}).get(action.sender_username) if action.sender_username else None
+    # label is decoupled from gating: the resolved nick for this sender (sanitized)
+    label = sanitize_label(label)
     msg = update.get("message") or update.get("edited_message") or {}
 
     jobs: list[ForwardJob] = []

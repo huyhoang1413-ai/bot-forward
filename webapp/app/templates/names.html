@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Tên đã ghi nhận — {{ bot.username }}{% endblock %}
+{% block content %}
+
+<p><a href="/bots/{{ bot.id }}">← Về chi tiết bot @{{ bot.username }}</a></p>
+
+{% if error == "bad_label" %}<div class="err">Nhãn không hợp lệ (1–32 ký tự, không chứa [ ] hoặc xuống dòng).</div>{% endif %}
+
+<div class="card">
+  <h2 style="margin-top:0;font-size:16px">Tên đã ghi nhận</h2>
+  <p class="muted">Tên (first_name) bot tự ghi nhận khi người đó gửi tin. Đặt <b>ghi đè</b> để dùng tên khác.
+  {% if auto_nick %}Nickname tự động đang <b>BẬT</b>.{% else %}Nickname tự động đang <b>tắt</b> — bật ở trang bot để áp dụng.{% endif %}</p>
+
+  <form method="get" action="/bots/{{ bot.id }}/names" class="row" style="margin-bottom:12px">
+    <div><input type="text" name="q" value="{{ q }}" placeholder="Tìm theo tên hoặc username..."></div>
+    <div style="flex:0 0 auto"><button type="submit">Tìm</button></div>
+    {% if q %}<div style="flex:0 0 auto"><a href="/bots/{{ bot.id }}/names" style="line-height:36px">Xoá bộ lọc</a></div>{% endif %}
+  </form>
+
+  {% if items %}
+  <table>
+    <thead><tr><th>Tên (first_name)</th><th>Username</th><th>Ghi đè nick</th><th></th></tr></thead>
+    <tbody>
+      {% for p in items %}
+      <tr>
+        <td>{{ p.first_name }}</td>
+        <td class="muted">{% if p.username %}@{{ p.username }}{% else %}—{% endif %}</td>
+        <td>
+          <form method="post" action="/bots/{{ bot.id }}/names/{{ p.id }}/label" style="display:flex; gap:6px; margin:0">
+            <input type="text" name="label" value="{{ p.label_override or '' }}" placeholder="để trống = dùng first_name" style="max-width:200px">
+            <button class="ghost" type="submit" style="font-size:12px">Lưu</button>
+          </form>
+        </td>
+        <td style="text-align:right">
+          <form method="post" action="/bots/{{ bot.id }}/names/{{ p.id }}/delete" style="margin:0"
+                onsubmit="return confirm('Xoá tên đã ghi nhận của {{ p.first_name }}?')">
+            <button class="ghost" type="submit">Xoá</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div style="margin-top:12px; display:flex; justify-content:space-between; align-items:center">
+    <span class="muted">Trang {{ page + 1 }}/{{ total_pages }} ({{ total }} người)</span>
+    <div class="row" style="flex:0 0 auto">
+      {% if has_prev %}<a href="/bots/{{ bot.id }}/names?q={{ q }}&page={{ page - 1 }}">← Trang trước</a>{% endif %}
+      {% if has_next %}<a href="/bots/{{ bot.id }}/names?q={{ q }}&page={{ page + 1 }}" style="margin-left:12px">Trang sau →</a>{% endif %}
+    </div>
+  </div>
+  {% elif q %}
+  <p class="muted">Không tìm thấy "{{ q }}".</p>
+  {% else %}
+  <p class="muted">Chưa ghi nhận tên nào. Tên sẽ xuất hiện khi có người gửi tin trong nhóm nguồn.</p>
+  {% endif %}
+</div>
+
+{% endblock %}

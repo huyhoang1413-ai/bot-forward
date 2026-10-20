@@ -11,6 +11,7 @@ from app.forwarding import (
     is_valid_username,
     normalize_username,
     prefix_len16,
+    sanitize_label,
     select_destinations,
     shift_entities,
 )
@@ -85,8 +86,23 @@ def test_build_jobs_stamps_dest_thread_id():
 def test_build_jobs_labeled_stamps_dest_thread_id():
     upd = _lmsg(10, 5, "alice", text="hi", is_topic_message=True, message_thread_id=7)
     jobs = build_jobs(upd, 999, [_route(10, 20, source_thread=7, dest_thread=3)], 1,
-                      label_map={"alice": "Doby"})
+                      label="Doby")
     assert jobs[0].kind == "text" and jobs[0].text == "[Doby] hi" and jobs[0].dest_thread_id == 3
+
+
+def test_sanitize_label():
+    assert sanitize_label("Nguyễn") == "Nguyễn"            # unicode kept
+    assert sanitize_label("a[b]c") == "abc"                # brackets dropped
+    assert sanitize_label("line\nbreak") == "linebreak"    # newline dropped
+    assert sanitize_label("x" * 50) == "x" * 32            # clamped to 32
+    assert sanitize_label("") is None and sanitize_label(None) is None
+    assert sanitize_label("[]") is None                    # nothing usable -> None
+
+
+def test_build_jobs_label_is_sanitized():
+    upd = _lmsg(10, 5, "alice", text="hi")
+    jobs = build_jobs(upd, 999, [_route(10, 20)], 1, label="N[a]me")
+    assert jobs[0].kind == "text" and jobs[0].text == "[Name] hi"
 
 
 def test_chatid_in_topic_replies_into_topic():
@@ -220,7 +236,7 @@ def test_build_jobs_label_applies_in_open_group():
     jobs = build_jobs(
         upd, 999, routes, 1,
         allowed_by_source={10: {"bob": None}},  # group 11 is open
-        label_map={"alice": "Doby"}, gate_active=True,
+        label="Doby", gate_active=True,
     )
     assert len(jobs) == 1 and jobs[0].kind == "text" and jobs[0].text == "[Doby] hi"
 
@@ -231,7 +247,7 @@ def test_build_jobs_label_applies_in_restricted_group():
     jobs = build_jobs(
         upd, 999, routes, 1,
         allowed_by_source={10: {"alice": "Doby"}},
-        label_map={"alice": "Doby"}, gate_active=True,
+        label="Doby", gate_active=True,
     )
     assert jobs[0].kind == "text" and jobs[0].text == "[Doby] hi"
 
@@ -269,7 +285,7 @@ def test_classify_message():
 def test_labeled_text_prefixes_and_shifts_entities():
     upd = _lmsg(10, 5, "alice", text="hi",
                 entities=[{"type": "bold", "offset": 0, "length": 2}])
-    jobs = build_jobs(upd, 999, [_route(10, 20)], 1, label_map={"alice": "Doby"})
+    jobs = build_jobs(upd, 999, [_route(10, 20)], 1, label="Doby")
     assert len(jobs) == 1 and jobs[0].kind == "text"
     assert jobs[0].text == "[Doby] hi"
     ents = json.loads(jobs[0].entities_json)
@@ -279,7 +295,7 @@ def test_labeled_text_prefixes_and_shifts_entities():
 def test_labeled_caption_media_overrides_caption():
     upd = _lmsg(10, 5, "alice", photo=[{"file_id": "x"}], caption="pic",
                 caption_entities=[{"type": "italic", "offset": 0, "length": 3}])
-    jobs = build_jobs(upd, 999, [_route(10, 20)], 1, label_map={"alice": "Doby"})
+    jobs = build_jobs(upd, 999, [_route(10, 20)], 1, label="Doby")
     assert len(jobs) == 1 and jobs[0].kind == "copy_caption"
     assert jobs[0].caption == "[Doby] pic"
     assert json.loads(jobs[0].caption_entities_json)[0]["offset"] == 7
@@ -287,24 +303,24 @@ def test_labeled_caption_media_overrides_caption():
 
 def test_labeled_media_without_caption_uses_label_only():
     upd = _lmsg(10, 5, "alice", photo=[{"file_id": "x"}])
-    jobs = build_jobs(upd, 999, [_route(10, 20)], 1, label_map={"alice": "Doby"})
+    jobs = build_jobs(upd, 999, [_route(10, 20)], 1, label="Doby")
     assert jobs[0].kind == "copy_caption" and jobs[0].caption == "[Doby]"
 
 
 def test_labeled_other_type_label_line_then_copy_in_order():
     upd = _lmsg(10, 5, "alice", sticker={"file_id": "s"})
-    jobs = build_jobs(upd, 999, [_route(10, 20)], 1, label_map={"alice": "Doby"})
+    jobs = build_jobs(upd, 999, [_route(10, 20)], 1, label="Doby")
     assert [j.kind for j in jobs] == ["text", "copy"]
     assert jobs[0].text == "[Doby]"
 
 
 def test_allowed_without_label_is_plain_copy():
     upd = _lmsg(10, 5, "alice", text="hi")
-    jobs = build_jobs(upd, 999, [_route(10, 20)], 1, label_map={"alice": None})
+    jobs = build_jobs(upd, 999, [_route(10, 20)], 1, label=None)
     assert len(jobs) == 1 and jobs[0].kind == "copy" and jobs[0].entities_json is None
 
 
 def test_labeled_text_over_limit_falls_back_to_plain_copy():
     upd = _lmsg(10, 5, "alice", text="x" * 4096)  # + prefix exceeds 4096
-    jobs = build_jobs(upd, 999, [_route(10, 20)], 1, label_map={"alice": "Doby"})
+    jobs = build_jobs(upd, 999, [_route(10, 20)], 1, label="Doby")
     assert jobs[0].kind == "copy"  # delivered unlabeled, not dropped

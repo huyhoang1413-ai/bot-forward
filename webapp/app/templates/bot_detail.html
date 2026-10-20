@@ -44,6 +44,16 @@
 </div>
 
 <div class="card">
+  <h3 style="margin-top:0;font-size:15px">Nickname tự động</h3>
+  <p class="muted">Bật để bot <b>tự lấy tên (first_name)</b> của người gửi làm nick, gắn vào tin forward dạng <b>[Tên] nội dung</b>. Tên được ghi nhận <b>một lần</b> (sửa/ghi đè được). Nhãn thủ công (nếu có) vẫn ưu tiên.</p>
+  <form method="post" action="/bots/{{ bot.id }}/auto-nick" style="display:flex; align-items:center; gap:10px">
+    <label style="margin:0"><input type="checkbox" name="auto_nick" value="1"{% if auto_nick %} checked{% endif %} onchange="this.form.submit()"> Tự động gắn tên người gửi</label>
+    <noscript><button type="submit">Lưu</button></noscript>
+  </form>
+  <p style="margin-top:8px"><a href="/bots/{{ bot.id }}/names">Tên đã ghi nhận ({{ profiles_count }}) →</a></p>
+</div>
+
+<div class="card">
   <h3 style="margin-top:0;font-size:15px">Tuyến forward ({{ source_groups|length }} nhóm nguồn)</h3>
   <p class="muted">Mỗi nhóm nguồn chuyển tin tới nhóm đích tương ứng. Vào từng nhóm để chọn người gửi được forward.</p>
 

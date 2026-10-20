@@ -4,14 +4,28 @@ from sqlmodel import Session, select
 
 from app.crypto import encrypt_token
 from app.db import engine
-from app.models import AllowedSender, Bot, Route, SenderGroupAssignment, Team
+from app.models import (
+    AllowedSender,
+    Bot,
+    Route,
+    SenderGroupAssignment,
+    SenderProfile,
+    Team,
+)
 from app.services import (
     add_allowed_sender,
     add_group_sender,
     add_route,
     add_sender_by_username,
     can_access_bot,
+    capture_sender,
+    count_profiles,
     count_senders,
+    delete_profile,
+    list_profiles,
+    resolve_label,
+    set_auto_nick,
+    set_profile_override,
     create_team,
     create_user,
     delete_allowed_sender,
@@ -397,3 +411,68 @@ def test_visible_bots_and_can_access():
         assert can_access_bot(b2, t1.id, False) is False
         assert can_access_bot(admin_only, None, True) is True
         assert can_access_bot(admin_only, t1.id, False) is False
+
+
+# --- auto-nickname: capture + resolve + profile CRUD ---
+
+def _profiles(session, bot_id):
+    return session.exec(
+        select(SenderProfile).where(SenderProfile.bot_id == bot_id)
+    ).all()
+
+
+def test_capture_sender_once_and_skips_empty():
+    bot_id = _make_bot(2601)
+    with Session(engine) as s:
+        capture_sender(s, bot_id, 501, "Nguyen", "nguyenvan")
+        capture_sender(s, bot_id, 501, "Changed", "nguyenvan")  # capture-once: no overwrite
+        rows = _profiles(s, bot_id)
+        assert len(rows) == 1 and rows[0].first_name == "Nguyen"
+        # missing user_id or first_name -> skip
+        capture_sender(s, bot_id, None, "X")
+        capture_sender(s, bot_id, 502, None)
+        assert len(_profiles(s, bot_id)) == 1
+
+
+def test_resolve_label_precedence():
+    bot_id = _make_bot(2602)
+    with Session(engine) as s:
+        set_auto_nick(s, bot_id, True)
+        bot = s.get(Bot, bot_id)
+        capture_sender(s, bot_id, 601, "Doby", "dobyuser")
+        # manual username-label wins
+        assert resolve_label(s, bot, "dobyuser", 601, "Manual") == "Manual"
+        # no manual -> captured first_name (auto_nick on)
+        assert resolve_label(s, bot, "dobyuser", 601, None) == "Doby"
+        # override beats first_name
+        prof = _profiles(s, bot_id)[0]
+        set_profile_override(s, prof.id, bot_id, "Boss")
+        assert resolve_label(s, bot, "dobyuser", 601, None) == "Boss"
+
+
+def test_resolve_label_off_and_unknown():
+    bot_id = _make_bot(2603)
+    with Session(engine) as s:
+        bot = s.get(Bot, bot_id)  # auto_nick defaults False
+        capture_sender(s, bot_id, 701, "Alice", None)
+        assert resolve_label(s, bot, None, 701, None) is None   # auto_nick off
+        set_auto_nick(s, bot_id, True)
+        bot = s.get(Bot, bot_id)
+        assert resolve_label(s, bot, None, 999, None) is None   # no profile
+
+
+def test_profile_list_search_override_delete():
+    bot_id = _make_bot(2604)
+    with Session(engine) as s:
+        capture_sender(s, bot_id, 801, "Alpha", "alphauser")
+        capture_sender(s, bot_id, 802, "Beta", "betauser")
+        assert count_profiles(s, bot_id) == 2
+        items, total = list_profiles(s, bot_id, q="Alph")
+        assert total == 1 and items[0].first_name == "Alpha"
+        pid = _profiles(s, bot_id)[0].id
+        delete_profile(s, pid, bot_id)
+        assert count_profiles(s, bot_id) == 1
+        # delete scoped to bot (wrong bot -> no-op)
+        other = _profiles(s, bot_id)[0]
+        delete_profile(s, other.id, 999999)
+        assert count_profiles(s, bot_id) == 1

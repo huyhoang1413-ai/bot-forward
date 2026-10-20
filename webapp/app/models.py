@@ -48,6 +48,7 @@ class Bot(SQLModel, table=True):
     status: str = "active"  # active | disabled | invalid
     access_password_hash: str | None = None  # optional per-bot access lock
     team_id: int | None = Field(default=None, foreign_key="team.id", index=True)
+    auto_nick: bool = Field(default=False)  # auto-prefix forwards with sender first_name
     created_at: datetime = Field(default_factory=_now)
 
 
@@ -114,6 +115,28 @@ class SenderGroupAssignment(SQLModel, table=True):
             "allowed_sender_id", "source_chat_id", name="uq_sender_group_assign"
         ),
         Index("ix_group_sender", "source_chat_id", "allowed_sender_id"),
+    )
+
+
+class SenderProfile(SQLModel, table=True):
+    """Captured sender identity for auto-nickname.
+
+    ``first_name`` is captured ONCE (first message seen) and never overwritten;
+    ``label_override`` is an admin edit that wins over it. Keyed by user_id so it
+    covers senders without a username.
+    """
+
+    id: int | None = Field(default=None, primary_key=True)
+    bot_id: int = Field(index=True)
+    telegram_user_id: int = Field(index=True)
+    first_name: str
+    label_override: str | None = None
+    username: str | None = None
+    captured_at: datetime = Field(default_factory=_now)
+
+    __table_args__ = (
+        UniqueConstraint("bot_id", "telegram_user_id", name="uq_sender_profile"),
+        Index("ix_sender_profile_bot_first", "bot_id", "first_name"),
     )
 
 

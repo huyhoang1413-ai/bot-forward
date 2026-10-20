@@ -57,6 +57,8 @@ def test_member_cannot_mutate_other_teams_bot(client):
     _login(client, "eve_e", PW)
     # every /bots/{id} entrypoint must reject a cross-team member with 403
     assert client.get(f"/bots/{other}/senders", follow_redirects=False).status_code == 403
+    assert client.get(f"/bots/{other}/names", follow_redirects=False).status_code == 403
+    assert client.post(f"/bots/{other}/auto-nick", data={}, follow_redirects=False).status_code == 403
     assert client.get(f"/bots/{other}/groups/10/senders", follow_redirects=False).status_code == 403
     assert client.post(f"/bots/{other}/routes", data={}, follow_redirects=False).status_code == 403
     assert client.post(f"/bots/{other}/routes/1/edit", data={}, follow_redirects=False).status_code == 403

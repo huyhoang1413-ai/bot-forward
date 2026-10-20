@@ -13,8 +13,9 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlmodel import Session, select
 
+from app import services
 from app.db import get_session
-from app.forwarding import build_jobs
+from app.forwarding import build_jobs, decide_action
 from app.models import AllowedSender
 from app.models import Bot as BotModel
 from app.models import Route, SenderGroupAssignment
@@ -61,9 +62,23 @@ async def receive_update(
             allowed_by_source.setdefault(assign.source_chat_id, {})[snd.username] = snd.label
     gate_active = bool(label_map)  # no senders -> forward everyone (legacy)
 
+    # Auto-nickname: capture the sender's first_name (once) + resolve the label
+    # for THIS message (manual username-label > profile override > first_name).
+    action = decide_action(update, bot_row.telegram_bot_id)
+    label = None
+    if action.kind == "forward":
+        services.capture_sender(
+            session, bot_id, action.sender_user_id,
+            action.sender_first_name, action.sender_username,
+        )
+        label = services.resolve_label(
+            session, bot_row, action.sender_username, action.sender_user_id,
+            label_map.get(action.sender_username),
+        )
+
     jobs = build_jobs(
         update, bot_row.telegram_bot_id, routes, bot_id,
-        allowed_by_source, label_map, gate_active,
+        allowed_by_source, label, gate_active,
     )
     for job in jobs:
         session.add(job)

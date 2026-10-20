@@ -6,6 +6,7 @@ import logging
 import secrets
 
 from sqlalchemy import func
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlmodel import Session, select
 
 from app import botcache, telegram_api
@@ -18,6 +19,7 @@ from app.models import (
     ForwardJob,
     Route,
     SenderGroupAssignment,
+    SenderProfile,
     Team,
     User,
 )
@@ -574,3 +576,118 @@ def reset_user_password(session: Session, user_id: int, password: str) -> bool:
     return True
 
 
+
+
+# --- Auto-nickname: capture sender names, resolve forward label ---
+
+_captured: set[tuple[int, int]] = set()  # (bot_id, user_id) already stored this process
+
+
+def capture_sender(
+    session: Session,
+    bot_id: int,
+    user_id: int | None,
+    first_name: str | None,
+    username: str | None = None,
+) -> None:
+    """Store a sender's first_name ONCE per (bot, user). Cheap: in-memory cache
+    skips repeat senders; ON CONFLICT DO NOTHING keeps the first captured name."""
+    if user_id is None or not first_name:
+        return
+    key = (bot_id, user_id)
+    if key in _captured:
+        return
+    stmt = (
+        sqlite_insert(SenderProfile)
+        .values(
+            bot_id=bot_id,
+            telegram_user_id=user_id,
+            first_name=first_name,
+            username=normalize_username(username) if username else None,
+        )
+        .on_conflict_do_nothing(index_elements=["bot_id", "telegram_user_id"])
+    )
+    session.execute(stmt)
+    session.commit()
+    _captured.add(key)
+
+
+def resolve_label(
+    session: Session,
+    bot: Bot,
+    sender_username: str | None,
+    sender_user_id: int | None,
+    manual_label: str | None,
+) -> str | None:
+    """Effective forward nickname for a message's sender.
+
+    Precedence: manual username-label > profile override > captured first_name
+    (only when the bot's ``auto_nick`` is on) > None.
+    """
+    if manual_label:
+        return manual_label
+    if not bot.auto_nick or sender_user_id is None:
+        return None
+    prof = session.exec(
+        select(SenderProfile).where(
+            SenderProfile.bot_id == bot.id,
+            SenderProfile.telegram_user_id == sender_user_id,
+        )
+    ).first()
+    if not prof:
+        return None
+    return prof.label_override or prof.first_name
+
+
+def set_auto_nick(session: Session, bot_id: int, value: bool) -> None:
+    bot = session.get(Bot, bot_id)
+    if bot:
+        bot.auto_nick = value
+        session.add(bot)
+        session.commit()
+
+
+def count_profiles(session: Session, bot_id: int) -> int:
+    return session.exec(
+        select(func.count()).select_from(
+            select(SenderProfile).where(SenderProfile.bot_id == bot_id).subquery()
+        )
+    ).one()
+
+
+def list_profiles(
+    session: Session, bot_id: int, q: str = "", page: int = 0, page_size: int = PAGE_SIZE
+):
+    """Captured sender profiles, prefix-searched by first_name or username."""
+    base = select(SenderProfile).where(SenderProfile.bot_id == bot_id)
+    if q:
+        qn = (q or "").strip().lstrip("@").lower()
+        base = base.where(
+            SenderProfile.first_name.startswith(q.strip())
+            | SenderProfile.username.startswith(qn)
+        )
+    total = session.exec(select(func.count()).select_from(base.subquery())).one()
+    page = max(0, page)
+    items = session.exec(
+        base.order_by(SenderProfile.first_name)
+        .offset(page * page_size)
+        .limit(page_size)
+    ).all()
+    return items, total
+
+
+def set_profile_override(
+    session: Session, profile_id: int, bot_id: int, label: str | None
+) -> None:
+    row = session.get(SenderProfile, profile_id)
+    if row and row.bot_id == bot_id:
+        row.label_override = (label or "").strip() or None
+        session.add(row)
+        session.commit()
+
+
+def delete_profile(session: Session, profile_id: int, bot_id: int) -> None:
+    row = session.get(SenderProfile, profile_id)
+    if row and row.bot_id == bot_id:
+        session.delete(row)
+        session.commit()

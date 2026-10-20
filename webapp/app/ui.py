@@ -187,6 +187,8 @@ async def bot_detail(bot_id: int, request: Request, session: Session = Depends(g
             "open_group": open_group,
             "inline_preview": INLINE_PREVIEW,
             "has_password": bool(bot.access_password_hash),
+            "auto_nick": bool(bot.auto_nick),
+            "profiles_count": services.count_profiles(session, bot_id),
             "error": request.query_params.get("error"),
         },
     )
@@ -443,6 +445,67 @@ async def edit_allowed_label(
     return RedirectResponse(
         f"/bots/{bot_id}/senders", status_code=status.HTTP_303_SEE_OTHER
     )
+
+
+# --- Auto-nickname: per-bot toggle + captured names management ---
+
+@router.post(
+    "/bots/{bot_id}/auto-nick",
+    dependencies=[Depends(require_auth), Depends(require_bot_access)],
+)
+async def set_auto_nick(
+    bot_id: int, auto_nick: str = Form(""), session: Session = Depends(get_session)
+):
+    services.set_auto_nick(session, bot_id, bool(auto_nick.strip()))
+    return RedirectResponse(f"/bots/{bot_id}", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.get(
+    "/bots/{bot_id}/names", response_class=HTMLResponse,
+    dependencies=[Depends(require_auth), Depends(require_bot_access)],
+)
+async def names_page(
+    bot_id: int, request: Request, q: str = "", page: int = 0,
+    session: Session = Depends(get_session),
+):
+    bot = session.get(Bot, bot_id)
+    if not bot:
+        return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
+    items, total = services.list_profiles(session, bot_id, q, page)
+    ctx = {
+        "bot": bot, "items": items, "q": q,
+        "auto_nick": bool(bot.auto_nick),
+        "error": request.query_params.get("error"),
+        **_page_ctx(total, page, services.PAGE_SIZE),
+    }
+    return templates.TemplateResponse(request, "names.html", ctx)
+
+
+@router.post(
+    "/bots/{bot_id}/names/{profile_id}/label",
+    dependencies=[Depends(require_auth), Depends(require_bot_access)],
+)
+async def edit_profile_label(
+    bot_id: int, profile_id: int, label: str = Form(""),
+    session: Session = Depends(get_session),
+):
+    if label.strip() and not is_valid_label(label):
+        return RedirectResponse(
+            f"/bots/{bot_id}/names?error=bad_label", status_code=status.HTTP_303_SEE_OTHER
+        )
+    services.set_profile_override(session, profile_id, bot_id, label)
+    return RedirectResponse(f"/bots/{bot_id}/names", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post(
+    "/bots/{bot_id}/names/{profile_id}/delete",
+    dependencies=[Depends(require_auth), Depends(require_bot_access)],
+)
+async def delete_profile(
+    bot_id: int, profile_id: int, session: Session = Depends(get_session)
+):
+    services.delete_profile(session, profile_id, bot_id)
+    return RedirectResponse(f"/bots/{bot_id}/names", status_code=status.HTTP_303_SEE_OTHER)
 
 
 # --- Super-admin: teams & users management ---
