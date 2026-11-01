@@ -160,8 +160,38 @@ class ForwardJob(SQLModel, table=True):
     entities_json: str | None = None          # shifted entities for a labeled text job
     caption: str | None = None                # overridden caption for copy_caption
     caption_entities_json: str | None = None  # shifted caption entities
+    # Reply-aware forwarding: origin identifies the SOURCE message (all kinds) so
+    # the dest message id can be mapped after send; reply_to_source_message_id is
+    # the message this one replied to (in the source chat); reply_quote is the
+    # prebuilt '↳ name: snippet' used when the original has no forwarded copy.
+    origin_chat_id: int | None = None
+    origin_message_id: int | None = None
+    reply_to_source_message_id: int | None = None
+    reply_quote: str | None = None
     status: str = Field(default="pending", index=True)  # pending | failed
     attempts: int = 0
     next_attempt_at: datetime = Field(default_factory=_now_naive)
     last_error: str | None = None
     created_at: datetime = Field(default_factory=_now_naive)
+
+
+class MessageMap(SQLModel, table=True):
+    """Maps a forwarded SOURCE message to the delivered DEST message id, so a
+    later reply can be delivered as a reply to the right dest message. Pruned
+    after 3 days."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    bot_id: int = Field(index=True)
+    dest_chat_id: int
+    source_chat_id: int
+    source_message_id: int
+    dest_message_id: int
+    created_at: datetime = Field(default_factory=_now_naive)
+
+    __table_args__ = (
+        Index(
+            "ix_msgmap_lookup",
+            "bot_id", "dest_chat_id", "source_chat_id", "source_message_id",
+        ),
+        Index("ix_msgmap_created", "created_at"),
+    )

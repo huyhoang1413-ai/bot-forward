@@ -50,6 +50,12 @@ ngrok http 8000        # copy URL https://xxxx.ngrok-free.app vào PUBLIC_URL, r
 4. Vào trang bot → thêm **tuyến** (nguồn → đích), tick *Hai chiều* cho bridge.
 5. Forward chạy ngay, không cần restart.
 
+## Giữ ngữ cảnh tin trả lời (reply)
+Khi ai đó **trả lời** một tin trong nhóm nguồn, bản forward ở nhóm đích **cũng là reply** đúng tin đó — giữ nguyên mạch hội thoại. Tự động, không cần cấu hình.
+- Hoạt động được khi **cả tin gốc và tin trả lời đều được forward** (bot lưu mapping id tin nguồn→đích).
+- Nếu tin được-trả-lời **không có bản forward** (bị allowlist chặn / quá cũ / trước khi bật) → chèn **trích dẫn** `↳ Tên: nội dung` để vẫn hiểu context.
+- Mapping giữ **3 ngày** (reply tin cũ hơn 3 ngày sẽ rơi về trích dẫn). Dùng chung được với forum/topic + nickname.
+
 ## Nickname tự động (lấy tên Telegram)
 Bật ở trang bot → mục **"Nickname tự động"** → bot tự lấy **first_name** của người gửi làm nick, gắn vào tin forward dạng **`[Tên] nội dung`** — không cần gõ tay.
 - Tên được **ghi nhận 1 lần** khi người đó gửi tin (Bot API không tra được tên qua username, phải thấy tin). Áp dụng **mọi người**, kể cả khi không giới hạn allowlist.

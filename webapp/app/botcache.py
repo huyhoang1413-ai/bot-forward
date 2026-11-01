@@ -12,7 +12,7 @@ import logging
 import json
 
 from sqlmodel import Session, select
-from telegram import MessageEntity
+from telegram import MessageEntity, ReplyParameters
 from telegram.error import BadRequest, Forbidden
 from telegram.ext import AIORateLimiter, ExtBot
 
@@ -74,13 +74,16 @@ def _entities(json_str: str | None, bot: ExtBot):
     return [MessageEntity.de_json(e, bot) for e in json.loads(json_str)]
 
 
-async def send_job(job: dict) -> None:
-    """Deliver one outbox job.
+async def send_job(job: dict) -> int | None:
+    """Deliver one outbox job; return the new DEST message id (for reply mapping).
 
-    Transient errors propagate (worker retries with backoff). Telegram
-    BadRequest/Forbidden (e.g. "message can't be copied", bot kicked, chat not
-    found) are permanent -> raised as PermanentSendError so the worker fails the
-    job fast instead of blocking the destination's queue.
+    Reply-aware: if ``reply_to_message_id`` is set, the copy/send is made a reply
+    to it (allow_sending_without_reply -> still sends if the target was deleted).
+    If it is NOT set but a ``reply_quote`` exists (original had no forwarded copy),
+    the quote is prepended (text) or sent as a short leading line (media).
+
+    Transient errors propagate (worker retries). Telegram BadRequest/Forbidden are
+    permanent -> PermanentSendError so the worker fails the job fast.
     """
     bot = await _get_bot(job["bot_id"])
     if bot is None:
@@ -88,30 +91,50 @@ async def send_job(job: dict) -> None:
 
     kind = job["kind"]
     mt = job.get("dest_thread_id")  # forum topic (None = General/normal)
+    reply_id = job.get("reply_to_message_id")
+    quote = job.get("reply_quote")
+    rp = (
+        ReplyParameters(message_id=reply_id, allow_sending_without_reply=True)
+        if reply_id
+        else None
+    )
     try:
         if kind == "text":
-            await bot.send_message(
+            text = job["text"]
+            if reply_id is None and quote:  # fallback: inline quote
+                text = f"{quote}\n{text}"
+            msg = await bot.send_message(
                 chat_id=job["dest_chat_id"],
-                text=job["text"],
+                text=text,
                 entities=_entities(job.get("entities_json"), bot),
                 message_thread_id=mt,
+                reply_parameters=rp,
             )
-        elif kind == "copy_caption":
-            await bot.copy_message(
+            return msg.message_id
+        # media copies: no map -> a short leading quote line, then the copy
+        if reply_id is None and quote:
+            await bot.send_message(
+                chat_id=job["dest_chat_id"], text=quote, message_thread_id=mt,
+            )
+        if kind == "copy_caption":
+            mid = await bot.copy_message(
                 chat_id=job["dest_chat_id"],
                 from_chat_id=job["from_chat_id"],
                 message_id=job["message_id"],
                 caption=job.get("caption"),
                 caption_entities=_entities(job.get("caption_entities_json"), bot),
                 message_thread_id=mt,
+                reply_parameters=rp,
             )
         else:  # "copy"
-            await bot.copy_message(
+            mid = await bot.copy_message(
                 chat_id=job["dest_chat_id"],
                 from_chat_id=job["from_chat_id"],
                 message_id=job["message_id"],
                 message_thread_id=mt,
+                reply_parameters=rp,
             )
+        return mid.message_id
     except (BadRequest, Forbidden) as exc:
         raise PermanentSendError(str(exc)) from exc
 

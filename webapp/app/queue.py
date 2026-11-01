@@ -18,13 +18,25 @@ import logging
 from collections.abc import Awaitable, Callable
 from datetime import timedelta
 
+from sqlalchemy import delete
 from sqlmodel import Session, select
 
-from app.models import ForwardJob, _now_naive
+from app.models import ForwardJob, MessageMap, _now_naive
 
 logger = logging.getLogger(__name__)
 
 MAX_ATTEMPTS = 8
+MAP_RETENTION = timedelta(days=3)       # keep reply mappings this long
+MAP_PRUNE_EVERY = timedelta(minutes=30)  # how often the worker prunes
+
+
+def prune_message_map(engine) -> int:
+    """Delete MessageMap rows older than the retention window. Returns row count."""
+    cutoff = _now_naive() - MAP_RETENTION
+    with Session(engine) as s:
+        result = s.execute(delete(MessageMap).where(MessageMap.created_at < cutoff))
+        s.commit()
+        return result.rowcount or 0
 
 # send_fn receives a plain dict of job fields and raises on failure.
 SendFn = Callable[[dict], Awaitable[None]]
@@ -63,8 +75,30 @@ def _job_to_dict(job: ForwardJob) -> dict:
         "entities_json": job.entities_json,
         "caption": job.caption,
         "caption_entities_json": job.caption_entities_json,
+        "origin_chat_id": job.origin_chat_id,
+        "origin_message_id": job.origin_message_id,
+        "reply_to_source_message_id": job.reply_to_source_message_id,
+        "reply_quote": job.reply_quote,
         "attempts": job.attempts,
     }
+
+
+def _lookup_map(
+    session, bot_id: int, dest_chat_id: int, source_chat_id: int, source_message_id: int
+) -> int | None:
+    """Dest message id previously delivered for a source message (for replies)."""
+    row = session.exec(
+        select(MessageMap)
+        .where(
+            MessageMap.bot_id == bot_id,
+            MessageMap.dest_chat_id == dest_chat_id,
+            MessageMap.source_chat_id == source_chat_id,
+            MessageMap.source_message_id == source_message_id,
+        )
+        .order_by(MessageMap.id.desc())
+        .limit(1)
+    ).first()
+    return row.dest_message_id if row else None
 
 
 # ------------------------------- the worker ---------------------------------
@@ -76,6 +110,7 @@ class Worker:
         self._poll = poll_interval
         self._running = False
         self._tasks: dict[int, asyncio.Task] = {}
+        self._last_prune = None
 
     def stop(self) -> None:
         self._running = False
@@ -84,11 +119,22 @@ class Worker:
         """Dispatcher: ensure one per-chat task exists for every chat with work."""
         self._running = True
         while self._running:
+            self._maybe_prune()
             for chat in self._chats_with_pending():
                 task = self._tasks.get(chat)
                 if task is None or task.done():
                     self._tasks[chat] = asyncio.create_task(self._process_chat(chat))
             await asyncio.sleep(self._poll)
+
+    def _maybe_prune(self) -> None:
+        now = _now_naive()
+        if self._last_prune is not None and now - self._last_prune < MAP_PRUNE_EVERY:
+            return
+        self._last_prune = now
+        try:
+            prune_message_map(self._engine)
+        except Exception as exc:  # pruning must never break delivery
+            logger.warning("message_map prune failed: %s", exc)
 
     def _chats_with_pending(self) -> list[int]:
         with Session(self._engine) as s:
@@ -112,6 +158,14 @@ class Worker:
                 return None
             data = _job_to_dict(job)
             data["next_attempt_at"] = job.next_attempt_at
+            # Resolve the reply target NOW (send time): the original's job (smaller
+            # id, same dest) was delivered + mapped before this one -> correct.
+            data["reply_to_message_id"] = None
+            if job.reply_to_source_message_id and job.origin_chat_id is not None:
+                data["reply_to_message_id"] = _lookup_map(
+                    s, job.bot_id, job.dest_chat_id,
+                    job.origin_chat_id, job.reply_to_source_message_id,
+                )
             return data
 
     async def _process_chat(self, chat: int) -> None:
@@ -128,8 +182,8 @@ class Worker:
                     continue
 
                 try:
-                    await self._send_fn(head)
-                    self._delete(head["id"])
+                    dest_msg_id = await self._send_fn(head)
+                    self._finish(head, dest_msg_id)
                 except Exception as exc:  # reschedule or fail; never silently drop
                     if getattr(exc, "permanent", False):
                         # Undeliverable (e.g. "message can't be copied", bot kicked)
@@ -155,12 +209,23 @@ class Worker:
         finally:
             self._tasks.pop(chat, None)
 
-    def _delete(self, job_id: int) -> None:
+    def _finish(self, head: dict, dest_msg_id: int | None) -> None:
+        """After a successful send: record the source->dest map and delete the job
+        in one transaction. A crash before commit -> job stays pending -> redeliver
+        (at-least-once, unchanged). A map insert without delete never happens."""
         with Session(self._engine) as s:
-            job = s.get(ForwardJob, job_id)
+            if dest_msg_id and head.get("origin_message_id") is not None:
+                s.add(MessageMap(
+                    bot_id=head["bot_id"],
+                    dest_chat_id=head["dest_chat_id"],
+                    source_chat_id=head["origin_chat_id"],
+                    source_message_id=head["origin_message_id"],
+                    dest_message_id=dest_msg_id,
+                ))
+            job = s.get(ForwardJob, head["id"])
             if job:
                 s.delete(job)
-                s.commit()
+            s.commit()
 
     def _reschedule(
         self, job_id: int, status: str, attempts: int, delay: float, error: str

@@ -55,6 +55,19 @@ def sanitize_label(name: str | None) -> str | None:
     return s[:32] or None
 
 
+QUOTE_BODY_LIMIT = 80  # chars of the replied-to content kept in the fallback quote
+
+
+def build_quote(first_name: str | None, body: str | None) -> str | None:
+    """Prebuilt '↳ name: snippet' for the no-map reply fallback (untrusted ->
+    strip newlines, clamp the body). Returns None if there's nothing to show."""
+    name = (first_name or "?").replace("\n", " ").replace("\r", " ").strip() or "?"
+    body = (body or "").replace("\n", " ").replace("\r", " ").strip()
+    if len(body) > QUOTE_BODY_LIMIT:
+        body = body[:QUOTE_BODY_LIMIT].rstrip() + "…"
+    return f"↳ {name}: {body}" if body else f"↳ {name}"
+
+
 def prefix_len16(prefix: str) -> int:
     """Length of a string in UTF-16 code units (Telegram entity offset unit)."""
     return len(prefix.encode("utf-16-le")) // 2
@@ -172,6 +185,8 @@ class Action:
     source_thread_id: int | None = None  # forum topic of the source message (None = General)
     sender_user_id: int | None = None  # from.id (for auto-nick capture)
     sender_first_name: str | None = None  # from.first_name (auto-nick source)
+    reply_to_source_message_id: int | None = None  # replied-to msg id in the source chat
+    reply_quote: str | None = None  # prebuilt '↳ name: snippet' for the no-map fallback
 
 
 def decide_action(update: dict, telegram_bot_id: int) -> Action:
@@ -206,6 +221,19 @@ def decide_action(update: dict, telegram_bot_id: int) -> Action:
 
     raw_username = from_user.get("username")
     sender_username = normalize_username(raw_username) if raw_username else None
+
+    # Reply context: the message this one replied to (one level). Only a real
+    # in-group reply (reply_to_message present) is tracked.
+    rtm = msg.get("reply_to_message")
+    reply_id = None
+    reply_quote = None
+    if isinstance(rtm, dict):
+        reply_id = rtm.get("message_id")
+        reply_quote = build_quote(
+            (rtm.get("from") or {}).get("first_name"),
+            rtm.get("text") or rtm.get("caption"),
+        )
+
     return Action(
         "forward",
         source_chat_id=source,
@@ -214,6 +242,8 @@ def decide_action(update: dict, telegram_bot_id: int) -> Action:
         source_thread_id=thread,
         sender_user_id=from_user.get("id"),
         sender_first_name=from_user.get("first_name"),
+        reply_to_source_message_id=reply_id,
+        reply_quote=reply_quote,
     )
 
 
@@ -332,4 +362,12 @@ def build_jobs(
             jobs.append(
                 _copy_job(bot_id, dest, action.source_chat_id, action.message_id, dest_thread)
             )
+
+    # Stamp every job with the source identity (to map the dest id after send) and
+    # the reply context (resolved to a dest reply target / quote at send time).
+    for j in jobs:
+        j.origin_chat_id = action.source_chat_id
+        j.origin_message_id = action.message_id
+        j.reply_to_source_message_id = action.reply_to_source_message_id
+        j.reply_quote = action.reply_quote
     return jobs

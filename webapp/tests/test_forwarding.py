@@ -4,6 +4,7 @@ import json
 
 from app.forwarding import (
     build_jobs,
+    build_quote,
     classify_message,
     decide_action,
     is_sender_allowed,
@@ -88,6 +89,43 @@ def test_build_jobs_labeled_stamps_dest_thread_id():
     jobs = build_jobs(upd, 999, [_route(10, 20, source_thread=7, dest_thread=3)], 1,
                       label="Doby")
     assert jobs[0].kind == "text" and jobs[0].text == "[Doby] hi" and jobs[0].dest_thread_id == 3
+
+
+# --- reply-aware forwarding (pure) ---
+
+def test_build_quote_clamps_and_strips():
+    assert build_quote("Nguyễn", "hello world") == "↳ Nguyễn: hello world"
+    assert build_quote(None, "x") == "↳ ?: x"
+    assert build_quote("A", "line\nbreak\rhere") == "↳ A: line break here"
+    long = build_quote("A", "y" * 200)
+    assert long.startswith("↳ A: ") and long.endswith("…") and len(long) < 100
+    assert build_quote("A", "") == "↳ A"
+
+
+def test_decide_action_extracts_reply():
+    upd = {"message": {"chat": {"id": 10}, "from": {"id": 5}, "message_id": 7, "text": "hi",
+                       "reply_to_message": {"message_id": 100, "from": {"first_name": "Bob"},
+                                            "text": "original"}}}
+    a = decide_action(upd, telegram_bot_id=999)
+    assert a.reply_to_source_message_id == 100
+    assert a.reply_quote == "↳ Bob: original"
+
+
+def test_decide_action_non_reply_has_no_reply_fields():
+    a = decide_action(_msg(10, 5), telegram_bot_id=999)
+    assert a.reply_to_source_message_id is None and a.reply_quote is None
+
+
+def test_build_jobs_stamps_origin_and_reply():
+    upd = {"message": {"chat": {"id": 10}, "from": {"id": 5}, "message_id": 7, "text": "hi",
+                       "reply_to_message": {"message_id": 100, "from": {"first_name": "Bob"},
+                                            "text": "orig"}}}
+    jobs = build_jobs(upd, 999, [_route(10, 20), _route(10, 21)], 1)
+    assert len(jobs) == 2
+    for j in jobs:
+        assert j.origin_chat_id == 10 and j.origin_message_id == 7
+        assert j.reply_to_source_message_id == 100
+        assert j.reply_quote == "↳ Bob: orig"
 
 
 def test_sanitize_label():
