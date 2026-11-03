@@ -18,7 +18,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from datetime import timedelta
 
-from sqlalchemy import delete
+from sqlalchemy import text
 from sqlmodel import Session, select
 
 from app.models import ForwardJob, MessageMap, _now_naive
@@ -31,10 +31,18 @@ MAP_PRUNE_EVERY = timedelta(minutes=30)  # how often the worker prunes
 
 
 def prune_message_map(engine) -> int:
-    """Delete MessageMap rows older than the retention window. Returns row count."""
-    cutoff = _now_naive() - MAP_RETENTION
+    """Delete MessageMap rows older than the retention window. Returns row count.
+
+    Uses raw SQL with a string cutoff matching SQLite's stored datetime format
+    ("YYYY-MM-DD HH:MM:SS.ffffff") so it works regardless of the SQLModel/pydantic
+    version's naive-vs-aware datetime strictness on typed ORM comparisons.
+    """
+    cutoff = (_now_naive() - MAP_RETENTION).strftime("%Y-%m-%d %H:%M:%S.%f")
     with Session(engine) as s:
-        result = s.execute(delete(MessageMap).where(MessageMap.created_at < cutoff))
+        result = s.execute(
+            text("DELETE FROM messagemap WHERE created_at < :cutoff"),
+            {"cutoff": cutoff},
+        )
         s.commit()
         return result.rowcount or 0
 
