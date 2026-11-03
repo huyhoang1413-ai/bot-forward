@@ -7,6 +7,7 @@ from app.forwarding import (
     build_quote,
     classify_message,
     decide_action,
+    first_token,
     is_sender_allowed,
     is_valid_label,
     is_valid_username,
@@ -24,6 +25,21 @@ def _lmsg(chat, uid, username, message_id=7, **extra):
          "message_id": message_id}
     m.update(extra)
     return {"message": m}
+
+
+def test_first_token():
+    # first whitespace-delimited token (first_name may be multi-word)
+    assert first_token("Minh Anh") == "Minh"
+    assert first_token("Nguyen Van A") == "Nguyen"
+    assert first_token("Antony") == "Antony"
+    # collapses any whitespace run; leading/trailing stripped
+    assert first_token("  Minh   Anh ") == "Minh"
+    # nothing usable -> None
+    assert first_token("") is None
+    assert first_token(None) is None
+    assert first_token("   ") is None
+    # non-splittable (emoji / single glyph) kept as-is
+    assert first_token("🔥") == "🔥"
 
 
 def _route(source, dest, enabled=True, source_thread=None, dest_thread=None):

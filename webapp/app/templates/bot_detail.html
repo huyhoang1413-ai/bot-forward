@@ -33,19 +33,19 @@
 </div>
 
 <div class="card">
-  <h3 style="margin-top:0;font-size:15px">Người gửi được forward (danh sách chung)</h3>
-  <p class="muted">Khai báo người + <b>nick name</b> <b>một lần</b>, rồi gán họ cho từng nhóm ở phần "Tuyến forward".
-  Danh sách trống → <b>forward mọi người</b>.</p>
+  <h3 style="margin-top:0;font-size:15px">Biệt danh người gửi (tuỳ chọn)</h3>
+  <p class="muted">Đặt <b>tên hiển thị</b> cho người gửi (gắn dạng <b>[Tên] nội dung</b> khi forward).
+  Đây <b>chỉ là tên hiển thị — KHÔNG quyết định ai được forward</b>. Việc đó cấu hình ở mỗi tuyến, mục "Người gửi được phép".</p>
   {% if senders_count %}
-  <p><b>{{ senders_count }} người</b> đã khai báo. <a href="/bots/{{ bot.id }}/senders">Quản lý Nickname →</a></p>
+  <p><b>{{ senders_count }} biệt danh</b> đã đặt. <a href="/bots/{{ bot.id }}/senders">Quản lý Nickname →</a></p>
   {% else %}
-  <p class="muted">Không giới hạn — đang forward mọi người. <a href="/bots/{{ bot.id }}/senders">Thêm người gửi →</a></p>
+  <p class="muted">Chưa đặt biệt danh nào. <a href="/bots/{{ bot.id }}/senders">Thêm biệt danh →</a></p>
   {% endif %}
 </div>
 
 <div class="card">
   <h3 style="margin-top:0;font-size:15px">Nickname tự động</h3>
-  <p class="muted">Bật để bot <b>tự lấy tên (first_name)</b> của người gửi làm nick, gắn vào tin forward dạng <b>[Tên] nội dung</b>. Tên được ghi nhận <b>một lần</b> (sửa/ghi đè được). Nhãn thủ công (nếu có) vẫn ưu tiên.</p>
+  <p class="muted">Bật để bot <b>tự lấy tên (first_name — phần trước dấu cách đầu tiên)</b> của người gửi làm nick, gắn dạng <b>[Tên] nội dung</b>. Ghi nhận <b>một lần</b> (sửa/ghi đè được). Nhãn thủ công vẫn ưu tiên. Chỉ là tên hiển thị, không ảnh hưởng ai được forward.</p>
   <form method="post" action="/bots/{{ bot.id }}/auto-nick" style="display:flex; align-items:center; gap:10px">
     <label style="margin:0"><input type="checkbox" name="auto_nick" value="1"{% if auto_nick %} checked{% endif %} onchange="this.form.submit()"> Tự động gắn tên người gửi</label>
     <noscript><button type="submit">Lưu</button></noscript>

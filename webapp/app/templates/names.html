@@ -8,7 +8,7 @@
 
 <div class="card">
   <h2 style="margin-top:0;font-size:16px">Tên đã ghi nhận</h2>
-  <p class="muted">Tên (first_name) bot tự ghi nhận khi người đó gửi tin. Đặt <b>ghi đè</b> để dùng tên khác.
+  <p class="muted">Tên (first_name) bot tự ghi nhận khi người đó gửi tin. Nickname tự động dùng <b>phần trước dấu cách đầu tiên</b> (vd "Minh Anh" → "Minh"). Đặt <b>ghi đè</b> để dùng tên khác (dùng nguyên văn).
   {% if auto_nick %}Nickname tự động đang <b>BẬT</b>.{% else %}Nickname tự động đang <b>tắt</b> — bật ở trang bot để áp dụng.{% endif %}</p>
 
   <form method="get" action="/bots/{{ bot.id }}/names" class="row" style="margin-bottom:12px">
@@ -27,7 +27,7 @@
         <td class="muted">{% if p.username %}@{{ p.username }}{% else %}—{% endif %}</td>
         <td>
           <form method="post" action="/bots/{{ bot.id }}/names/{{ p.id }}/label" style="display:flex; gap:6px; margin:0">
-            <input type="text" name="label" value="{{ p.label_override or '' }}" placeholder="để trống = dùng first_name" style="max-width:200px">
+            <input type="text" name="label" value="{{ p.label_override or '' }}" placeholder="để trống = tên trước dấu cách đầu" style="max-width:200px">
             <button class="ghost" type="submit" style="font-size:12px">Lưu</button>
           </form>
         </td>
