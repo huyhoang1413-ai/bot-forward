@@ -13,9 +13,10 @@ def _now() -> datetime:
 
 
 def _now_naive() -> datetime:
-    # Naive UTC — SQLite returns naive datetimes, so keep scheduling naive to
-    # avoid aware/naive comparison errors in the worker.
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    # NOTE: returns a tz-AWARE UTC datetime despite the legacy name. Newer SQLModel's
+    # DateTime type rejects naive datetimes on bind ("Datetime values must have
+    # timezone information"), so ForwardJob/MessageMap timestamps must be aware too.
+    return datetime.now(timezone.utc)
 
 
 class Team(SQLModel, table=True):

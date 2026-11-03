@@ -16,9 +16,9 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
-from datetime import timedelta
+from datetime import timedelta, timezone
 
-from sqlalchemy import text
+from sqlalchemy import delete
 from sqlmodel import Session, select
 
 from app.models import ForwardJob, MessageMap, _now_naive
@@ -30,31 +30,20 @@ MAP_RETENTION = timedelta(days=3)       # keep reply mappings this long
 MAP_PRUNE_EVERY = timedelta(minutes=30)  # how often the worker prunes
 
 
-def _as_naive(dt):
-    """Coerce a possibly tz-aware DB datetime to naive UTC.
-
-    Newer SQLModel/SQLAlchemy reads naive-stored DateTime columns back as
-    tz-AWARE, while scheduling uses naive ``_now_naive()``. Subtracting the two
-    raises TypeError, which would crash the per-chat delivery loop. Normalizing
-    to naive here is version-proof (old lib: already naive -> no-op)."""
-    if dt is not None and getattr(dt, "tzinfo", None) is not None:
-        return dt.replace(tzinfo=None)
+def _as_aware(dt):
+    """Coerce a possibly-naive DB datetime to tz-aware UTC so arithmetic with the
+    (aware) ``_now_naive()`` never mixes naive/aware. Version-proof: some lib
+    versions read stored datetimes back naive, others aware."""
+    if dt is not None and getattr(dt, "tzinfo", None) is None:
+        return dt.replace(tzinfo=timezone.utc)
     return dt
 
 
 def prune_message_map(engine) -> int:
-    """Delete MessageMap rows older than the retention window. Returns row count.
-
-    Uses raw SQL with a string cutoff matching SQLite's stored datetime format
-    ("YYYY-MM-DD HH:MM:SS.ffffff") so it works regardless of the SQLModel/pydantic
-    version's naive-vs-aware datetime strictness on typed ORM comparisons.
-    """
-    cutoff = (_now_naive() - MAP_RETENTION).strftime("%Y-%m-%d %H:%M:%S.%f")
+    """Delete MessageMap rows older than the retention window. Returns row count."""
+    cutoff = _now_naive() - MAP_RETENTION  # aware UTC
     with Session(engine) as s:
-        result = s.execute(
-            text("DELETE FROM messagemap WHERE created_at < :cutoff"),
-            {"cutoff": cutoff},
-        )
+        result = s.execute(delete(MessageMap).where(MessageMap.created_at < cutoff))
         s.commit()
         return result.rowcount or 0
 
@@ -195,7 +184,7 @@ class Worker:
                 if head is None:
                     return  # chat drained; dispatcher respawns on new work
 
-                wait = (_as_naive(head["next_attempt_at"]) - _now_naive()).total_seconds()
+                wait = (_as_aware(head["next_attempt_at"]) - _now_naive()).total_seconds()
                 if wait > 0:
                     # Head not due yet (retry backoff) -> hold the chat, preserve order.
                     await asyncio.sleep(min(wait, 3.0))
