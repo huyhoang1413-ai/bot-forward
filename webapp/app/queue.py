@@ -30,6 +30,18 @@ MAP_RETENTION = timedelta(days=3)       # keep reply mappings this long
 MAP_PRUNE_EVERY = timedelta(minutes=30)  # how often the worker prunes
 
 
+def _as_naive(dt):
+    """Coerce a possibly tz-aware DB datetime to naive UTC.
+
+    Newer SQLModel/SQLAlchemy reads naive-stored DateTime columns back as
+    tz-AWARE, while scheduling uses naive ``_now_naive()``. Subtracting the two
+    raises TypeError, which would crash the per-chat delivery loop. Normalizing
+    to naive here is version-proof (old lib: already naive -> no-op)."""
+    if dt is not None and getattr(dt, "tzinfo", None) is not None:
+        return dt.replace(tzinfo=None)
+    return dt
+
+
 def prune_message_map(engine) -> int:
     """Delete MessageMap rows older than the retention window. Returns row count.
 
@@ -183,7 +195,7 @@ class Worker:
                 if head is None:
                     return  # chat drained; dispatcher respawns on new work
 
-                wait = (head["next_attempt_at"] - _now_naive()).total_seconds()
+                wait = (_as_naive(head["next_attempt_at"]) - _now_naive()).total_seconds()
                 if wait > 0:
                     # Head not due yet (retry backoff) -> hold the chat, preserve order.
                     await asyncio.sleep(min(wait, 3.0))
