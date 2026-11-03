@@ -41,7 +41,11 @@ def create_db_and_tables() -> None:
     _add_missing_columns()
     _add_search_indexes()
     _collapse_allowed_senders_to_global()
-    _backfill_group_sender_assignments()
+    # NOTE: _backfill_group_sender_assignments() is intentionally NOT called.
+    # It auto-assigned every nickname-list sender to every source group, which
+    # silently turned the (display-only) nickname list into a per-group forward
+    # gate -> the "only 1 person forwards" incident. Gating is now explicit per
+    # route only ("Người gửi được phép"). Kept as a no-op for history.
 
 
 def _add_missing_columns() -> None:
@@ -122,39 +126,14 @@ def _add_search_indexes() -> None:
 
 
 def _backfill_group_sender_assignments() -> None:
-    """One-time idempotent migration for the per-group assignment feature.
-
-    Assign every existing global sender to every distinct source group of its
-    bot, preserving today's 'the allowlist applies to all groups' behavior.
-    A no-op once each (sender, group) pair already has an assignment row.
+    """DEPRECATED / no-op. Previously assigned every global sender to every
+    source group, which silently turned the display-only nickname list into a
+    per-group forward gate (cause of the "only 1 person forwards" incident).
+    Gating is now explicit per route only. Left as a no-op so no NEW auto-gates
+    are ever created; existing assignment rows are untouched (clean them by
+    removing senders from a route's "Người gửi được phép" if unwanted).
     """
-    from app.models import AllowedSender, Route, SenderGroupAssignment
-
-    if not inspect(engine).has_table("sendergroupassignment"):
-        return
-    with Session(engine) as session:
-        senders = session.exec(select(AllowedSender)).all()
-        if not senders:
-            return
-        existing = {
-            (a.allowed_sender_id, a.source_chat_id)
-            for a in session.exec(select(SenderGroupAssignment)).all()
-        }
-        groups_by_bot: dict[int, set[int]] = {}
-        for r in session.exec(select(Route)).all():
-            groups_by_bot.setdefault(r.bot_id, set()).add(r.source_chat_id)
-
-        made = False
-        for snd in senders:
-            for src in groups_by_bot.get(snd.bot_id, ()):  # no routes -> nothing to assign
-                if (snd.id, src) in existing:
-                    continue
-                session.add(
-                    SenderGroupAssignment(allowed_sender_id=snd.id, source_chat_id=src)
-                )
-                made = True
-        if made:
-            session.commit()
+    return
 
 
 def get_session() -> Iterator[Session]:

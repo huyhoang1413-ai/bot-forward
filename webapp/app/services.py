@@ -11,7 +11,7 @@ from sqlmodel import Session, select
 
 from app import botcache, telegram_api
 from app.crypto import decrypt_token, encrypt_token
-from app.forwarding import normalize_username
+from app.forwarding import first_token, normalize_username
 from app.models import (
     GLOBAL_SOURCE,
     AllowedSender,
@@ -636,7 +636,9 @@ def resolve_label(
     ).first()
     if not prof:
         return None
-    return prof.label_override or prof.first_name
+    # Manual override wins verbatim; the AUTO name is trimmed to the first token
+    # (first_name may be multi-word: "Minh Anh" -> "Minh").
+    return prof.label_override or first_token(prof.first_name)
 
 
 def set_auto_nick(session: Session, bot_id: int, value: bool) -> None:

@@ -450,6 +450,37 @@ def test_resolve_label_precedence():
         assert resolve_label(s, bot, "dobyuser", 601, None) == "Boss"
 
 
+def test_resolve_label_auto_trims_to_first_token():
+    """Auto-nick uses only the first token of a multi-word first_name; manual
+    label and profile override are kept verbatim (untrimmed)."""
+    bot_id = _make_bot(2606)
+    with Session(engine) as s:
+        set_auto_nick(s, bot_id, True)
+        bot = s.get(Bot, bot_id)
+        capture_sender(s, bot_id, 801, "Minh Anh", "minhanh")
+        # auto path -> first token only
+        assert resolve_label(s, bot, "minhanh", 801, None) == "Minh"
+        # manual label verbatim (multi-word preserved)
+        assert resolve_label(s, bot, "minhanh", 801, "Minh Anh VIP") == "Minh Anh VIP"
+        # override verbatim (multi-word preserved)
+        prof = [p for p in _profiles(s, bot_id) if p.telegram_user_id == 801][0]
+        set_profile_override(s, prof.id, bot_id, "Chi Minh Anh")
+        assert resolve_label(s, bot, "minhanh", 801, None) == "Chi Minh Anh"
+
+
+def test_add_allowed_sender_creates_no_assignment():
+    """A nickname-registry entry (section 1) must NOT gate any group: adding a
+    sender creates zero SenderGroupAssignment rows."""
+    bot_id = _make_bot(2607)
+    with Session(engine) as s:
+        add_allowed_sender(s, bot_id, "charlie", label="Charlie")
+        own = [r.id for r in s.exec(
+            select(AllowedSender).where(AllowedSender.bot_id == bot_id)).all()]
+        rows = s.exec(select(SenderGroupAssignment).where(
+            SenderGroupAssignment.allowed_sender_id.in_(own))).all()
+        assert rows == []
+
+
 def test_resolve_label_off_and_unknown():
     bot_id = _make_bot(2603)
     with Session(engine) as s:

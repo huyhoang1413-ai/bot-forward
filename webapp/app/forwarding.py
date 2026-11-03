@@ -55,6 +55,17 @@ def sanitize_label(name: str | None) -> str | None:
     return s[:32] or None
 
 
+def first_token(name: str | None) -> str | None:
+    """First whitespace-delimited token of a name. Telegram's ``first_name`` can
+    hold multiple words ("Minh Anh"), so the auto-nickname uses only the part
+    before the first space ("Minh"). Falls back to the full stripped name (e.g.
+    emoji-only names split to nothing), then None."""
+    if not name:
+        return None
+    parts = name.split()  # splits on any run of unicode whitespace
+    return (parts[0] if parts else name.strip()) or None
+
+
 QUOTE_BODY_LIMIT = 80  # chars of the replied-to content kept in the fallback quote
 
 

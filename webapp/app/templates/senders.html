@@ -8,8 +8,8 @@
 {% if error == "bad_label" %}<div class="err">Nhãn không hợp lệ (1–32 ký tự, không chứa [ ] hoặc xuống dòng).</div>{% endif %}
 
 <div class="card">
-  <h2 style="margin-top:0;font-size:16px">Quản lý người gửi (danh sách chung)</h2>
-  <p class="muted">Khai báo người + nick name một lần, rồi gán họ cho từng nhóm. Danh sách trống = forward mọi người.</p>
+  <h2 style="margin-top:0;font-size:16px">Quản lý biệt danh người gửi</h2>
+  <p class="muted">Đặt <b>tên hiển thị</b> cho người gửi (dạng <b>[Tên] nội dung</b> khi forward). Chỉ là tên hiển thị — <b>không quyết định ai được forward</b> (cấu hình ở từng tuyến, mục "Người gửi được phép").</p>
 
   <form method="post" action="/bots/{{ bot.id }}/allowed" class="row" style="margin-bottom:16px">
     <div><input type="text" name="username" placeholder="username (không cần @)" required></div>
